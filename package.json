@@ -1,0 +1,46 @@
+{
+  "name": "agent-merge",
+  "version": "0.1.0",
+  "description": "Version control for AI agent sessions — fork, merge, and bisect your agent's timeline.",
+  "keywords": [
+    "agent",
+    "llm",
+    "version-control",
+    "session",
+    "trajectory",
+    "context",
+    "harness",
+    "bisect"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": ">=20.19"
+  },
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "agent-merge": "./dist/cli/main.js"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc -p tsconfig.json",
+    "test": "node --test tests/*.test.ts",
+    "prepublishOnly": "npm run typecheck && npm run build && npm test"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}

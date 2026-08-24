@@ -1,0 +1,43 @@
+{
+  "name": "dsh-plugin-agent-merge",
+  "version": "0.1.0",
+  "description": "DeepSeek Harness plugin: forkable, mergeable, bisectable session history backed by agent-merge",
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "agent-merge",
+    "session",
+    "version-control",
+    "bisect"
+  ],
+  "license": "MIT",
+  "type": "module",
+  "main": "./lib/index.js",
+  "types": "./lib/index.d.ts",
+  "files": [
+    "lib",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.check.json",
+    "test": "node --test tests/*.test.ts"
+  },
+  "dependencies": {
+    "agent-merge": "file:../.."
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1-rc.1",
+    "@deepseek-ai/dsh-llm": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-session": "^0.0.1-rc.1",
+    "@deepseek-ai/dsh-tools": "^0.0.1-rc.1",
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  }
+}
