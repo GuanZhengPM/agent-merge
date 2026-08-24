@@ -16,14 +16,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}
-      - run: npm install --no-audit --no-fund
-      - run: npm run typecheck
-      - run: npm run build
-      - run: npm test
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.19.0
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run typecheck
+      - run: pnpm run build
+      - run: pnpm test
       - name: dsh plugin
         working-directory: integrations/dsh-plugin
         run: |
-          npm install --no-audit --no-fund
-          npm run typecheck
-          npm run build
-          npm test
+          pnpm run typecheck
+          pnpm run build
+          pnpm test
+          pnpm pack --pack-destination "$RUNNER_TEMP"

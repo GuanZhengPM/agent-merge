@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import { CallbackAgentRunner } from '@guanzhengpm/agent-merge';
+import { registerCodingRunTool } from '../src/coding-run.ts';
 import { SessionRecorder, toTrajectoryEvent } from '../src/recorder.ts';
 import { TimelineStore } from '../src/store.ts';
 
@@ -79,6 +81,25 @@ test('branchFor produces valid, distinct branch names', () => {
   assert.equal(TimelineStore.branchFor('abc-123'), 'dsh/abc-123');
   assert.equal(TimelineStore.branchFor('weird id!/x'), 'dsh/weird-id--x');
   assert.equal(TimelineStore.branchFor('-leading'), 'dsh/s-leading');
+});
+
+test('coding_run is registered with an injected native harness runner', () => {
+  let registered: unknown;
+  const ctx = {
+    tools: {
+      register(tool: unknown) {
+        registered = tool;
+      },
+    },
+  } as unknown as Context;
+  const runner = new CallbackAgentRunner('dsh-native-fixture', async () => ({
+    status: 'completed',
+    stdout: '',
+    stderr: '',
+    durationMs: 1,
+  }));
+  registerCodingRunTool(ctx, { testCommand: 'true', runner }, process.cwd());
+  assert.equal((registered as { name: string }).name, 'coding_run');
 });
 
 test('recorder buffers events and flushes them as one step per session', async () => {

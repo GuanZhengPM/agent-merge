@@ -1,8 +1,8 @@
 ---
 name: agent-merge
-description: Save-points, parallel timelines, and failure bisection for agent work. Use when the user wants to checkpoint progress, try two approaches in parallel, combine findings from different attempts, roll back to an earlier point, or find which step of a long session went wrong. Triggers include 存档 / 分叉 / 两个方案都试 / 合并结论 / 回滚 / 哪一步出错, checkpoint, fork, try both ways, merge findings, bisect.
+description: Multi-agent coding orchestration, save-points, parallel timelines, and failure bisection. Use when the user wants several agents to solve a coding task in isolated worktrees, test and merge a winner, checkpoint progress, try alternatives, combine findings, roll back, or find which step went wrong. Triggers include 多 agent / 多分支解题 / 自动验收 / 存档 / 分叉 / 两个方案都试 / 合并结论 / 回滚 / 哪一步出错, multi-agent coding, worktree, test and merge, checkpoint, fork, merge findings, bisect.
 license: MIT
-compatibility: Requires the agent-merge CLI on PATH (npm install -g agent-merge) and a shell tool.
+compatibility: Requires the agent-merge CLI on PATH (npm install -g @guanzhengpm/agent-merge) and a shell tool.
 metadata:
   author: agent-merge
   version: "0.1.0"
@@ -16,7 +16,7 @@ moments as events, fork parallel timelines when exploring alternatives, merge
 what each alternative learned, and bisect the journal when something went wrong.
 
 Run `agent-merge help` for the full command list. If the command is missing,
-tell the user to install it (`npm install -g agent-merge`) and stop.
+tell the user to install it (`npm install -g @guanzhengpm/agent-merge`) and stop.
 
 ## Ground rules
 
@@ -38,6 +38,29 @@ tell the user to install it (`npm install -g agent-merge`) and stop.
   - `payload`: any JSON. Put the substance here.
 
 ## Workflows
+
+**End-to-end coding fan-out / test / repair / merge** — prefer this when the
+user wants actual code alternatives rather than timeline-only exploration:
+
+```bash
+agent-merge run --task issue.md --agents 3 --runner auto --test '<acceptance command>' --retries 1
+```
+
+- The working tree must be clean. The command creates isolated temporary Git
+  worktrees, runs workers in parallel, evaluates each patch, feeds failures
+  into a repair round, selects a passing winner, applies it without committing,
+  and records a JSON report plus timeline events.
+- Use the current harness's native sub-agent adapter when it exposes one. In an
+  embedded integration, inject `AgentRunner` / `CallbackAgentRunner`. From the
+  standalone CLI, configure any harness with
+  `--runner command --agent-command '<worker command>'`; the task is provided on
+  stdin. `--runner auto` uses `AGENT_MERGE_RUNNER_COMMAND` when set, otherwise a
+  detected supported adapter.
+- The acceptance command is mandatory. Do not select a winner from agent prose
+  alone. Use `--dry-run` when the user only wants comparison and no code applied.
+- If no candidate passes after the configured repair rounds, report failure and
+  leave the main code untouched. Never merge a failing patch just to produce a
+  winner.
 
 **Checkpoint (存档)** — after completing a meaningful unit of work:
 

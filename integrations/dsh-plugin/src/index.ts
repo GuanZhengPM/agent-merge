@@ -7,13 +7,17 @@
  *   agent-merge store (one branch per session, one step per flush batch),
  *   subscribing to dsh's post-commit append feed the way persistence
  *   plugins are meant to;
- * - five `timeline_*` tools that let the agent itself fork, inspect, merge,
- *   and bisect the recorded history.
+ * - six `timeline_*` tools that let the agent itself fork, inspect, merge,
+ *   and bisect the recorded history;
+ * - an opt-in `coding_run` tool that performs test-gated multi-agent coding
+ *   through a configured CLI or injected native AgentRunner.
  *
  * @module dsh-plugin-agent-merge
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-session';
+import { registerCodingRunTool } from './coding-run.ts';
+import type { CodingRunConfig } from './coding-run.ts';
 import { SessionRecorder } from './recorder.ts';
 import { TimelineStore } from './store.ts';
 import { registerTimelineTools } from './tools.ts';
@@ -33,6 +37,8 @@ export interface Config {
   record?: boolean;
   /** Register the `timeline_*` tools. Default: true. */
   tools?: boolean;
+  /** Optional, explicit coding orchestration entrypoint. */
+  orchestration?: CodingRunConfig;
 }
 
 export function apply(ctx: Context, config: Config = {}): void {
@@ -45,9 +51,14 @@ export function apply(ctx: Context, config: Config = {}): void {
   if (config.tools !== false) {
     ctx.inject(['tools'], (toolCtx: Context) => {
       registerTimelineTools(toolCtx, store);
+      if (config.orchestration !== undefined) {
+        registerCodingRunTool(toolCtx, config.orchestration, config.path ?? process.cwd());
+      }
     });
   }
 }
 
 export { SessionRecorder, toTrajectoryEvent } from './recorder.ts';
 export { TimelineStore } from './store.ts';
+export { registerCodingRunTool } from './coding-run.ts';
+export type { CodingRunConfig } from './coding-run.ts';

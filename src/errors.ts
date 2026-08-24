@@ -48,3 +48,6 @@ export class BisectRangeError extends AgentMergeError {}
 
 /** The repository's advisory write lock could not be acquired in time. */
 export class LockTimeoutError extends AgentMergeError {}
+
+/** A coding-agent orchestration run could not be started or completed safely. */
+export class OrchestrationError extends AgentMergeError {}

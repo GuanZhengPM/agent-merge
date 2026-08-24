@@ -1,6 +1,6 @@
 # agent-merge
 
-Git-style version control for AI agent sessions: fork a session into parallel timelines, merge the results, and bisect a long run to find the step where it went wrong.
+Harness-neutral multi-agent coding orchestration plus Git-style version control for agent sessions. Run workers in isolated Git worktrees, test their patches, repair failed attempts, apply a winner, and retain every result as an auditable timeline.
 
 English | [中文](#zh)
 
@@ -29,7 +29,7 @@ Every write (append, merge, branch, checkout) runs under a lock, held in-process
 ## Install
 
 ```bash
-npm install agent-merge
+npm install @guanzhengpm/agent-merge
 ```
 
 The package has zero runtime dependencies. Node 20.19+ runs the built package; Node 23.6+ runs the repository source directly (no build step).
@@ -53,10 +53,40 @@ agent-merge bisect <good> <bad> --run 'sh check.sh'        # find the first bad 
 
 Each record is one JSON event with four fields: `kind` (`message` / `tool_call` / `tool_result` / `annotation`), `at` (epoch milliseconds), `actor`, and `payload` (any JSON).
 
+## Coding orchestration
+
+`agent-merge run` is the end-to-end coding loop that the timeline-only commands deliberately do not provide:
+
+```bash
+agent-merge run \
+  --task issue.md \
+  --agents 3 \
+  --runner auto \
+  --test "pnpm test" \
+  --retries 1
+```
+
+It requires a clean, checked-out Git branch. Each worker gets a temporary worktree at the same base commit. The acceptance command runs inside every worktree; only passing patches are eligible. The default judge selects the smallest passing patch, applies it to the current branch without committing, records candidate conclusions in `.agent-merge/`, and writes a full JSON report under `.agent-merge/runs/`. If every first attempt fails, the evaluator output is fed back to all workers for a repair round. Use `--dry-run` to select without applying or `--judge-command` to delegate selection to a harness/model command.
+
+The orchestration core is not Codex-specific. A host with native sub-agents injects `AgentRunner` (or uses `CallbackAgentRunner`); any CLI/harness can use `--runner command --agent-command "..."`. The task is sent on stdin and these environment variables are provided: `AGENT_MERGE_WORKSPACE`, `AGENT_MERGE_BRANCH`, `AGENT_MERGE_ATTEMPT`, `AGENT_MERGE_TASK`, and, on repair rounds, `AGENT_MERGE_FEEDBACK`. `--runner auto` honors `AGENT_MERGE_RUNNER_COMMAND` first, then uses the verified Codex CLI adapter when available.
+
+```ts
+import { CallbackAgentRunner, CommandEvaluator, orchestrate } from '@guanzhengpm/agent-merge';
+
+await orchestrate({
+  projectDir: process.cwd(),
+  task: 'Fix the issue in issue.md',
+  runner: new CallbackAgentRunner('my-harness', (input) => spawnNativeSubagent(input)),
+  evaluator: new CommandEvaluator('pnpm test'),
+  agents: 3,
+  retries: 1,
+});
+```
+
 ## Library
 
 ```ts
-import { Repository } from 'agent-merge';
+import { Repository } from '@guanzhengpm/agent-merge';
 
 const repo = Repository.inMemory();          // or: await Repository.init('./session')
 
@@ -127,7 +157,7 @@ Reconstruction at any step is cheap, so a 1000-step session takes about 10 probe
 
 ## Status
 
-v0.1, developer preview. The storage format is intended to be stable; APIs above it may still change. Planned: trajectory-format (ATIF) import/export, branch deletion and garbage collection, more merge strategies, harness adapters, storage compaction.
+v0.1, developer preview. The storage format is intended to be stable; APIs above it may still change. The first orchestration layer includes injectable/native runners, generic commands, a Codex CLI adapter, Git worktrees, command evaluation, repair rounds, deterministic or command-based winner selection, patch application, timelines, and reports. Planned: more first-party harness adapters, patch synthesis, trajectory-format (ATIF) import/export, branch deletion/garbage collection, and storage compaction.
 
 ## License
 
@@ -139,7 +169,7 @@ v0.1, developer preview. The storage format is intended to be stable; APIs above
 
 # agent-merge（中文）
 
-给 AI Agent 会话做的 git 式版本控制：把会话分叉成平行时间线、合并各线的成果、用二分法定位长会话中出错的那一步。
+面向不同 Harness 的多 Agent 编码编排，加上会话的 Git 式版本控制：在隔离 worktree 中并行解题，用测试筛选和修复 patch，把赢家应用回主分支，并保留完整可审计时间线。
 
 ## 解决什么问题
 
@@ -166,7 +196,7 @@ agent-merge 用 git 存代码的方式来存会话。
 ## 安装
 
 ```bash
-npm install agent-merge
+npm install @guanzhengpm/agent-merge
 ```
 
 零运行时依赖。Node 20.19+ 可运行构建产物；Node 23.6+ 可直接运行仓库源码，无需构建。
@@ -190,10 +220,27 @@ agent-merge bisect <好的步骤> <坏的步骤> --run 'sh check.sh'  # 二分�
 
 每条记录是一个 JSON 事件，四个字段：`kind`（`message` / `tool_call` / `tool_result` / `annotation`）、`at`（毫秒时间戳）、`actor`（谁）、`payload`（任意 JSON）。
 
+## 编码编排
+
+`agent-merge run` 补齐从“开多分支”到“代码合回去”的完整链路：
+
+```bash
+agent-merge run \
+  --task issue.md \
+  --agents 3 \
+  --runner auto \
+  --test "pnpm test" \
+  --retries 1
+```
+
+命令要求当前是干净、已检出的 Git 分支。每个 worker 从同一 commit 获得临时 worktree；验收命令在各自 worktree 内运行，只有通过的 patch 才能成为赢家。默认评委选择改动最小的通过 patch，不自动提交，只应用到当前工作树；候选结论写入 `.agent-merge/`，完整报告写入 `.agent-merge/runs/`。首轮全部失败时，会把 evaluator 输出反馈给所有 worker，自动进入修复轮。`--dry-run` 只选不应用，`--judge-command` 可把 winner 选择交给主 Harness 或模型。
+
+编排核心不绑定 Codex：有原生 sub-agent 的主 Harness 直接注入 `AgentRunner` / `CallbackAgentRunner`；任意 CLI 用 `--runner command --agent-command "..."`。任务通过 stdin 传递，同时提供 `AGENT_MERGE_WORKSPACE`、`AGENT_MERGE_BRANCH`、`AGENT_MERGE_ATTEMPT`、`AGENT_MERGE_TASK`，修复轮额外提供 `AGENT_MERGE_FEEDBACK`。`--runner auto` 优先采用 `AGENT_MERGE_RUNNER_COMMAND`，否则在可用时使用已验证的 Codex CLI adapter。
+
 ## 代码调用
 
 ```ts
-import { Repository } from 'agent-merge';
+import { Repository } from '@guanzhengpm/agent-merge';
 
 const repo = Repository.inMemory();          // 或 await Repository.init('./目录') 落盘
 
@@ -264,7 +311,7 @@ console.log(result.firstBadId, result.introduced);
 
 ## 状态
 
-v0.1 开发者预览。存储格式计划保持稳定，其上的 API 仍可能调整。计划中：轨迹格式（ATIF）导入导出、分支删除与垃圾回收、更多合并策略、harness 适配器、存储压缩。
+v0.1 开发者预览。存储格式计划保持稳定，其上的 API 仍可能调整。第一版编排层已经包含可注入/原生 Runner、通用命令、Codex CLI adapter、Git worktree、命令验收、失败修复轮、确定性或命令式 winner 选择、patch 应用、时间线和报告。后续计划：更多一方 Harness adapter、patch 综合、ATIF 导入导出、分支删除/垃圾回收和存储压缩。
 
 ## 许可证
 

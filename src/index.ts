@@ -54,6 +54,34 @@ export type { Head, RefStore } from './refs/ref-store.ts';
 export { FsRefStore } from './refs/fs-ref-store.ts';
 export type { FsRefStoreOptions } from './refs/fs-ref-store.ts';
 
+export { CommandEvaluator } from './orchestration/evaluator.ts';
+export type { EvaluationInput, EvaluationResult, Evaluator } from './orchestration/evaluator.ts';
+export { orchestrate } from './orchestration/orchestrator.ts';
+export type {
+  CandidateAttempt,
+  CandidateResult,
+  OrchestrationResult,
+  OrchestratorOptions,
+} from './orchestration/orchestrator.ts';
+export {
+  CallbackAgentRunner,
+  CodexCliRunner,
+  CommandAgentRunner,
+  resolveAgentRunner,
+} from './orchestration/runner.ts';
+export type {
+  AgentRunCallback,
+  AgentRunInput,
+  AgentRunResult,
+  AgentRunner,
+  CommandAgentRunnerOptions,
+  ResolveRunnerOptions,
+} from './orchestration/runner.ts';
+export { CommandCandidateSelector, SmallestPatchSelector } from './orchestration/selector.ts';
+export type { CandidateSelector, SelectableCandidate } from './orchestration/selector.ts';
+export { GitWorktreeProvider } from './orchestration/workspace.ts';
+export type { AgentWorkspace, CollectedPatch, WorkspaceProvider } from './orchestration/workspace.ts';
+
 export {
   AmbiguousRefError,
   BisectRangeError,
@@ -62,6 +90,7 @@ export {
   InvalidObjectError,
   InvalidRefNameError,
   LockTimeoutError,
+  OrchestrationError,
   MergeError,
   ObjectNotFoundError,
   RefNotFoundError,

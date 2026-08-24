@@ -5,10 +5,10 @@
 You need Node.js ≥ 23.6 — the repo runs TypeScript natively, so there is no build step during development.
 
 ```bash
-npm install          # dev dependencies only (typescript, @types/node)
-npm run typecheck    # tsc --noEmit over src + tests, strictest settings
-npm test             # node --test over tests/*.test.ts
-npm run build        # emit dist/ (library + CLI)
+pnpm install          # workspace dependencies
+pnpm run typecheck    # tsc --noEmit over src + tests, strictest settings
+pnpm test             # node --test over tests/*.test.ts
+pnpm run build        # emit dist/ (library + CLI)
 ```
 
 ## Ground rules

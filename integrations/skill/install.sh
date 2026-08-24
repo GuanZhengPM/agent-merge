@@ -35,5 +35,5 @@ case "$MODE" in
 esac
 
 if ! command -v agent-merge >/dev/null 2>&1; then
-  echo "note: the agent-merge CLI is not on PATH yet — install it with: npm install -g agent-merge"
+  echo "note: the agent-merge CLI is not on PATH yet — install it with: npm install -g @guanzhengpm/agent-merge"
 fi

@@ -13,10 +13,10 @@ const SKILL_PATH = fileURLToPath(
 
 async function readSkill(): Promise<{ frontmatter: Map<string, string>; body: string }> {
   const raw = await readFile(SKILL_PATH, 'utf8');
-  const match = /^---\n([\s\S]*?)\n---\n([\s\S]*)$/.exec(raw);
+  const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/.exec(raw);
   assert.ok(match, 'SKILL.md must start with a YAML frontmatter block');
   const frontmatter = new Map<string, string>();
-  for (const line of (match[1] as string).split('\n')) {
+  for (const line of (match[1] as string).split(/\r?\n/)) {
     const field = /^([a-z-]+):\s*(.*)$/.exec(line);
     if (field) frontmatter.set(field[1] as string, field[2] as string);
   }

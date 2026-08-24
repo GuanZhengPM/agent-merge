@@ -7,6 +7,10 @@ import { parseArgs } from 'node:util';
 import { AgentMergeError } from '../errors.ts';
 import { builtinManyStrategies, builtinStrategies, championStrategy, pickTailStrategy } from '../merge.ts';
 import type { BuiltinManyStrategyName, BuiltinStrategyName } from '../merge.ts';
+import { CommandEvaluator } from '../orchestration/evaluator.ts';
+import { orchestrate } from '../orchestration/orchestrator.ts';
+import { resolveAgentRunner } from '../orchestration/runner.ts';
+import { CommandCandidateSelector, SmallestPatchSelector } from '../orchestration/selector.ts';
 import { Repository } from '../repo.ts';
 import type { LogEntry } from '../repo.ts';
 import { assertTrajectoryEvent } from '../types.ts';
@@ -35,6 +39,19 @@ Commands:
                                   in full + others' conclusions, needs --winner)
   bisect <good> <bad> --run CMD   Find the first step where CMD starts failing;
                                   CMD sees AGENT_MERGE_STEP and AGENT_MERGE_CONTEXT (a JSON file)
+  run --task FILE --test CMD [options]
+                                  Run coding agents in parallel Git worktrees, evaluate
+                                  their patches, repair failed attempts, select a winner,
+                                  and apply it. Options:
+                                    --agents N              workers (default 3)
+                                    --retries N             repair rounds (default 1)
+                                    --runner auto|codex|command
+                                    --agent-command CMD     generic runner / auto override
+                                    --judge-command CMD     reads candidates JSON, prints id
+                                    --dry-run               select but do not apply code
+                                    --keep-workspaces       preserve temporary worktrees
+                                    --no-timeline           skip session timeline recording
+                                    --json                  print the full JSON report
   id <target>                     Resolve a ref or prefix to a full id
   help                            Show this message
 `;
@@ -315,6 +332,83 @@ async function cmdId(args: string[]): Promise<void> {
   console.log(await repo.resolve(target));
 }
 
+function integerFlag(value: string | boolean | undefined, name: string, fallback: number): number {
+  const raw = stringFlag(value, name);
+  if (raw === undefined) return fallback;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isInteger(parsed)) throw new UsageError(`--${name} expects an integer`);
+  return parsed;
+}
+
+async function cmdRun(args: string[]): Promise<void> {
+  const { values } = flags(args, {
+    task: { type: 'string' },
+    test: { type: 'string' },
+    agents: { type: 'string' },
+    retries: { type: 'string' },
+    runner: { type: 'string' },
+    'agent-command': { type: 'string' },
+    'judge-command': { type: 'string' },
+    'dry-run': { type: 'boolean' },
+    'keep-workspaces': { type: 'boolean' },
+    'no-timeline': { type: 'boolean' },
+    json: { type: 'boolean' },
+  });
+  const taskPath = stringFlag(values.task, 'task');
+  if (taskPath === undefined) throw new UsageError('run requires --task <file>');
+  const testCommand = stringFlag(values.test, 'test');
+  if (testCommand === undefined || testCommand.trim() === '') throw new UsageError('run requires --test <command>');
+  let task: string;
+  try {
+    task = await readFile(taskPath, 'utf8');
+  } catch (cause) {
+    throw new UsageError(`cannot read task file ${taskPath}: ${cause instanceof Error ? cause.message : String(cause)}`);
+  }
+  const runnerName = stringFlag(values.runner, 'runner') ?? 'auto';
+  if (runnerName !== 'auto' && runnerName !== 'codex' && runnerName !== 'command') {
+    throw new UsageError('--runner must be auto, codex, or command');
+  }
+  const agentCommand = stringFlag(values['agent-command'], 'agent-command');
+  const runner = await resolveAgentRunner({
+    runner: runnerName,
+    ...(agentCommand !== undefined ? { command: agentCommand } : {}),
+  });
+  const judgeCommand = stringFlag(values['judge-command'], 'judge-command');
+  const selector = judgeCommand === undefined
+    ? new SmallestPatchSelector()
+    : new CommandCandidateSelector(judgeCommand);
+  const result = await orchestrate({
+    projectDir: process.cwd(),
+    task,
+    runner,
+    evaluator: new CommandEvaluator(testCommand),
+    selector,
+    agents: integerFlag(values.agents, 'agents', 3),
+    retries: integerFlag(values.retries, 'retries', 1),
+    apply: values['dry-run'] !== true,
+    keepWorkspaces: values['keep-workspaces'] === true,
+    timeline: values['no-timeline'] !== true,
+  });
+  if (values.json === true) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  console.log(`run ${result.runId}: ${result.status}`);
+  console.log(`runner: ${result.runner}; evaluator: ${result.evaluator}; selector: ${result.selector}`);
+  for (const candidate of result.candidates) {
+    console.log(
+      `${candidate.id}: ${candidate.passed ? 'passed' : 'failed'}, ` +
+      `${candidate.attempts} attempt${candidate.attempts === 1 ? '' : 's'}, ` +
+      `${candidate.patch.length} patch bytes, ${candidate.files.length} file${candidate.files.length === 1 ? '' : 's'}`,
+    );
+  }
+  console.log(result.winner === null
+    ? 'winner: none (no patch applied)'
+    : `winner: ${result.winner}${result.applied ? ' (patch applied)' : ' (dry run)'}`);
+  console.log(`report: ${result.reportPath}`);
+  if (result.status === 'failed') process.exitCode = 1;
+}
+
 export async function main(argv: string[]): Promise<number> {
   const [command, ...rest] = argv;
   try {
@@ -352,6 +446,9 @@ export async function main(argv: string[]): Promise<number> {
       case 'bisect':
         await cmdBisect(rest);
         return 0;
+      case 'run':
+        await cmdRun(rest);
+        return process.exitCode === 1 ? 1 : 0;
       case 'id':
         await cmdId(rest);
         return 0;

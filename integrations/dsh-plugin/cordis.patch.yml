@@ -1,0 +1,6 @@
+- insert:
+    - id: agent-merge
+      name: dsh-plugin-agent-merge
+      config:
+        record: true
+        tools: true

@@ -14,7 +14,7 @@ session (`dsh/<session-id>`), one step per flush batch. The full original
 event (`type`, `seq`, `data`) rides in each payload, so the recorded timeline
 is losslessly replayable.
 
-**Gives the agent timeline tools.** Five tools are registered when a tool
+**Gives the agent timeline tools.** Six tools are registered when a tool
 registry is present:
 
 | Tool | What the agent can do with it |
@@ -23,37 +23,111 @@ registry is present:
 | `timeline_show` | inspect the replayable context at any step |
 | `timeline_fork` | branch a timeline at any point to explore an alternative |
 | `timeline_merge` | fold a branch back (`interleave` / `ours` / `theirs`) |
+| `timeline_merge_many` | fold several timelines back in one N-way merge |
 | `timeline_bisect` | binary-search a session for the step that introduced a marker |
+
+**Optionally orchestrates real coding workers.** When an `orchestration`
+configuration is explicitly supplied, the plugin also registers `coding_run`.
+It creates isolated Git worktrees, starts workers through the configured CLI
+or a programmatically injected native `AgentRunner`, runs a fixed acceptance
+command, retries failures with evaluator feedback, selects a passing patch,
+and optionally applies it. Timeline tools alone never pretend to merge code.
 
 ## Configuration
 
+Install the published bundle into an existing dsh profile:
+
+```bash
+dsh plugin --profile web add dsh-plugin-agent-merge
+dsh --profile web --dump-config   # verify the bundle layer
+dsh --profile web
+```
+
+The bundle enables recording and timeline tools by default. Its shipped
+`cordis.patch.yml` is equivalent to:
+
 ```yaml
-# in your dsh profile
-plugins:
-  dsh-plugin-agent-merge:
-    path: /path/to/workspace   # where .agent-merge/ lives (default: cwd)
-    record: true               # mirror session events (default)
-    tools: true                # register timeline_* tools (default)
+- insert:
+    - id: agent-merge
+      name: dsh-plugin-agent-merge
+      config:
+        record: true
+        tools: true
+```
+
+`path` defaults to the harness process working directory, where the plugin
+creates `.agent-merge/`. A profile may override the inserted `agent-merge`
+row when it needs a fixed workspace path.
+
+Coding orchestration is off by default because it launches worker processes
+and can modify a Git working tree. Enable it with an explicit, reviewable
+runner and test command, for example:
+
+```yaml
+- insert:
+    - id: agent-merge
+      name: dsh-plugin-agent-merge
+      config:
+        record: true
+        tools: true
+        orchestration:
+          projectPath: /workspace/project
+          runnerCommand: my-agent --non-interactive
+          testCommand: pnpm test
+          agents: 3
+          retries: 1
+          apply: true
+```
+
+The worker reads the task from stdin and receives
+`AGENT_MERGE_WORKSPACE`, `AGENT_MERGE_BRANCH`, `AGENT_MERGE_ATTEMPT`,
+`AGENT_MERGE_TASK`, and (during repair) `AGENT_MERGE_FEEDBACK`. A DSH host
+that exposes native sub-agents can import `registerCodingRunTool` and provide
+an `AgentRunner` directly instead of launching another CLI.
+
+For local development, install the checkout from the repository root:
+
+```bash
+dsh plugin --profile web add ./integrations/dsh-plugin
 ```
 
 ## Notes
 
-- Built and typechecked against the published `@deepseek-ai/*` type
-  declarations (`cordis`, `dsh-session`, `dsh-tools`, `dsh-llm`). dsh is a
+- Built and typechecked against the published `@deepseek-ai/*@0.1.1-rc.2`
+  release train (`cordis`, `dsh-session`, `dsh-tools`, `dsh-llm`). dsh is a
   developer preview and its extension contracts may still change; if a dsh
   update breaks this plugin, the binding surface is three small files
   (`src/index.ts`, `src/recorder.ts`, `src/tools.ts`).
+- The DSH packages are optional peers supplied by the harness at runtime and
+  mirrored in `devDependencies` for standalone typechecking and tests. A small
+  local type bridge keeps the used Cordis augmentations stable across pnpm's
+  optional-peer virtual package layouts; it emits no runtime behavior.
 - All store operations are serialized through one queue, so concurrent
   sessions and tool calls cannot interleave a checkout with an append.
-- The `agent-merge` dependency is declared as `file:../..` for in-repo
-  development and CI; a standalone npm release would pin a published version
-  instead.
+- The workspace uses `@guanzhengpm/agent-merge: workspace:^` during
+  development. `pnpm pack` and `pnpm publish` rewrite that specifier to the
+  matching published semver range, so registry consumers never receive a
+  local filesystem path.
 
 ## Develop
 
 ```bash
-npm install
-npm run typecheck   # strict, includes tests
-npm test            # node --test (no build needed, Node ≥ 23.6)
-npm run build       # emit lib/
+pnpm install
+pnpm run typecheck   # strict, includes tests
+pnpm test            # node --test (no build needed, Node ≥ 23.6)
+pnpm run build       # emit lib/
+pnpm pack           # verify the publishable tarball
 ```
+
+## Publish
+
+Publish the core package first, then the bundle that depends on it:
+
+```bash
+pnpm install --frozen-lockfile
+pnpm publish --access public
+pnpm --dir integrations/dsh-plugin publish --access public
+```
+
+The public package names are `@guanzhengpm/agent-merge` for the library/CLI
+and `dsh-plugin-agent-merge` for the installable DSH bundle.

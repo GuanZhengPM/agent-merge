@@ -1,6 +1,6 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
-import type { EventKind, TrajectoryEvent } from 'agent-merge';
+import type { EventKind, TrajectoryEvent } from '@guanzhengpm/agent-merge';
 import { TimelineStore } from './store.ts';
 
 /**

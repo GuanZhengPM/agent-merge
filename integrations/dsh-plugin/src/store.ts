@@ -1,5 +1,5 @@
-import { Repository, RepositoryNotFoundError } from 'agent-merge';
-import type { ObjectId, StepMeta, TrajectoryEvent } from 'agent-merge';
+import { Repository, RepositoryNotFoundError } from '@guanzhengpm/agent-merge';
+import type { ObjectId, StepMeta, TrajectoryEvent } from '@guanzhengpm/agent-merge';
 
 /**
  * One shared agent-merge repository for the whole harness process.

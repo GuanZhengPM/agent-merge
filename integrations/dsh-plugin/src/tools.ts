@@ -2,8 +2,8 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { ContentBlock } from '@deepseek-ai/dsh-llm';
 import { defineTool } from '@deepseek-ai/dsh-tools';
 import type {} from '@deepseek-ai/dsh-tools';
-import { championStrategy, pickTailStrategy } from 'agent-merge';
-import type { MaterializedEvent, MergeManyOptions } from 'agent-merge';
+import { championStrategy, pickTailStrategy } from '@guanzhengpm/agent-merge';
+import type { MaterializedEvent, MergeManyOptions } from '@guanzhengpm/agent-merge';
 import type { TimelineStore } from './store.ts';
 
 const SHORT = 12;
@@ -21,7 +21,7 @@ function preview(m: MaterializedEvent): string {
 }
 
 /**
- * The model-facing surface: five `timeline_*` tools over the shared store,
+ * The model-facing surface: six `timeline_*` tools over the shared store,
  * letting the agent fork, inspect, merge, and bisect recorded session
  * history. Registered under `ctx.inject(['tools'], …)` by the entry plugin
  * so assemblies without a tool registry stay unaffected.
