@@ -4,9 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import type { Context } from '@deepseek-ai/cordis';
+import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent';
 import { CallbackAgentRunner } from '@guanzhengpm/agent-merge';
-import { registerCodingRunTool } from '../src/coding-run.ts';
+import { DshSubagentRunner, registerCodingRunTool } from '../src/coding-run.ts';
 import { SessionRecorder, toTrajectoryEvent } from '../src/recorder.ts';
 import { TimelineStore } from '../src/store.ts';
 
@@ -100,6 +102,41 @@ test('coding_run is registered with an injected native harness runner', () => {
   }));
   registerCodingRunTool(ctx, { testCommand: 'true', runner }, process.cwd());
   assert.equal((registered as { name: string }).name, 'coding_run');
+});
+
+test('DshSubagentRunner delegates to the configured native provider and disposes it', async () => {
+  let request: { prompt: Array<{ type: string; text: string }> } | undefined;
+  let disposed = false;
+  const runtime = {
+    getProvider: (name: string) => name === 'spawn' ? {} : undefined,
+    list: () => ['spawn'],
+    start: async (_provider: string, nextRequest: typeof request) => {
+      request = nextRequest;
+      return {
+        result: Promise.resolve({
+          output: [{ type: 'text', text: 'implemented in assigned worktree' }],
+          stopReason: 'completed',
+        }),
+        dispose: async () => { disposed = true; },
+      };
+    },
+  } as unknown as SubagentRuntime;
+  const runner = new DshSubagentRunner(
+    runtime,
+    { id: 'parent' } as unknown as Agent,
+    new AbortController().signal,
+  );
+  const result = await runner.run({
+    task: 'fix the bug',
+    workspace: 'C:\\isolated\\agent-1',
+    branch: 'agent-merge/run/agent-1',
+    attempt: 1,
+  });
+  assert.equal(result.status, 'completed');
+  assert.equal(result.stdout, 'implemented in assigned worktree');
+  assert.equal(disposed, true);
+  assert.match(request?.prompt[0]?.text ?? '', /C:\\isolated\\agent-1/);
+  assert.match(request?.prompt[0]?.text ?? '', /Do not modify the parent agent workspace/);
 });
 
 test('recorder buffers events and flushes them as one step per session', async () => {

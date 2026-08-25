@@ -8,11 +8,13 @@
  * make typechecking independent of that installation detail.
  */
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
+import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent';
 import type { ToolRuntime } from '@deepseek-ai/dsh-tools';
 
 declare module '@deepseek-ai/cordis' {
   interface Context {
     tools: ToolRuntime;
+    subagents: SubagentRuntime;
   }
 
   interface Events {

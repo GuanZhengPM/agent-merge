@@ -10,7 +10,7 @@
  * - six `timeline_*` tools that let the agent itself fork, inspect, merge,
  *   and bisect the recorded history;
  * - an opt-in `coding_run` tool that performs test-gated multi-agent coding
- *   through a configured CLI or injected native AgentRunner.
+ *   through DSH's native subagents, a configured CLI, or an injected runner.
  *
  * @module dsh-plugin-agent-merge
  */
@@ -48,9 +48,12 @@ export function apply(ctx: Context, config: Config = {}): void {
     new SessionRecorder(ctx, store);
   }
 
-  if (config.tools !== false) {
-    ctx.inject(['tools'], (toolCtx: Context) => {
-      registerTimelineTools(toolCtx, store);
+  if (config.tools !== false || config.orchestration !== undefined) {
+    const needsNativeSubagents = config.orchestration !== undefined
+      && config.orchestration.runner === undefined
+      && config.orchestration.runnerCommand === undefined;
+    ctx.inject(needsNativeSubagents ? ['tools', 'subagents'] : ['tools'], (toolCtx: Context) => {
+      if (config.tools !== false) registerTimelineTools(toolCtx, store);
       if (config.orchestration !== undefined) {
         registerCodingRunTool(toolCtx, config.orchestration, config.path ?? process.cwd());
       }
@@ -60,5 +63,5 @@ export function apply(ctx: Context, config: Config = {}): void {
 
 export { SessionRecorder, toTrajectoryEvent } from './recorder.ts';
 export { TimelineStore } from './store.ts';
-export { registerCodingRunTool } from './coding-run.ts';
+export { DshSubagentRunner, registerCodingRunTool } from './coding-run.ts';
 export type { CodingRunConfig } from './coding-run.ts';

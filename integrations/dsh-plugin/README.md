@@ -28,10 +28,11 @@ registry is present:
 
 **Optionally orchestrates real coding workers.** When an `orchestration`
 configuration is explicitly supplied, the plugin also registers `coding_run`.
-It creates isolated Git worktrees, starts workers through the configured CLI
-or a programmatically injected native `AgentRunner`, runs a fixed acceptance
-command, retries failures with evaluator feedback, selects a passing patch,
-and optionally applies it. Timeline tools alone never pretend to merge code.
+It creates isolated Git worktrees, starts workers through DSH's own
+`ctx.subagents` provider (or a configured CLI/programmatic `AgentRunner`), runs
+a fixed acceptance command, retries failures with evaluator feedback, selects
+a passing patch, and optionally applies it. Timeline tools alone never pretend
+to merge code.
 
 ## Configuration
 
@@ -59,9 +60,9 @@ The bundle enables recording and timeline tools by default. Its shipped
 creates `.agent-merge/`. A profile may override the inserted `agent-merge`
 row when it needs a fixed workspace path.
 
-Coding orchestration is off by default because it launches worker processes
-and can modify a Git working tree. Enable it with an explicit, reviewable
-runner and test command, for example:
+Coding orchestration is off by default because it launches workers and can
+modify a Git working tree. In an ordinary DSH profile it uses the native
+`spawn` subagent provider by default:
 
 ```yaml
 - insert:
@@ -72,18 +73,23 @@ runner and test command, for example:
         tools: true
         orchestration:
           projectPath: /workspace/project
-          runnerCommand: my-agent --non-interactive
+          subagentProvider: spawn
           testCommand: pnpm test
           agents: 3
           retries: 1
           apply: true
 ```
 
-The worker reads the task from stdin and receives
+Each native child receives the assigned worktree's absolute path and strict
+instructions to keep every read, write, and command inside it. The orchestrator
+then accepts only the patch actually collected from that worktree and refuses
+to apply a winner if the parent checkout changed during the run.
+
+For a different Harness/CLI, set `runnerCommand: my-agent --non-interactive`.
+That process reads the task from stdin and receives
 `AGENT_MERGE_WORKSPACE`, `AGENT_MERGE_BRANCH`, `AGENT_MERGE_ATTEMPT`,
 `AGENT_MERGE_TASK`, and (during repair) `AGENT_MERGE_FEEDBACK`. A DSH host
-that exposes native sub-agents can import `registerCodingRunTool` and provide
-an `AgentRunner` directly instead of launching another CLI.
+can also import `registerCodingRunTool` and provide an `AgentRunner` directly.
 
 For local development, install the checkout from the repository root:
 
@@ -121,7 +127,12 @@ pnpm pack           # verify the publishable tarball
 
 ## Publish
 
-Publish the core package first, then the bundle that depends on it:
+The repository's **Publish npm packages** GitHub Actions workflow is the
+preferred release path. Configure an `npm` environment with an `NPM_TOKEN`
+secret, then dispatch the workflow. It runs all checks, publishes the core
+first, publishes this dependent bundle second, and attaches npm provenance.
+
+For a local release, publish in the same order:
 
 ```bash
 pnpm install --frozen-lockfile
