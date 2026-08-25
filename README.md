@@ -47,7 +47,7 @@ agent-merge diff main plan-a                               # what differs since 
 agent-merge merge plan-a                                   # fold back
 agent-merge materialize --pretty                           # the context a model would see
 agent-merge append --on other-branch                       # write to a branch without switching
-agent-merge merge b1 b2 b3 --strategy conclusions          # N-way merge
+agent-merge merge b1 b2 b3 --strategy conclusions          # N-way merge; same strategies for 1..N branches
 agent-merge bisect <good> <bad> --run 'sh check.sh'        # find the first bad step
 ```
 
@@ -128,7 +128,7 @@ Built-in strategies. Expose the list to the coordinating agent and let it choose
 | `pickTailStrategy(i)` | one branch in full | a judge already chose the winner |
 | `championStrategy(i)` | winner in full, plus the other branches' annotations | one branch won and the losers' findings are worth keeping |
 
-A strategy is a function from `{ base, tails }` to an event list, so an LLM judge or synthesizer plugs in as a plain async function. Runnable demo: [examples/multi-agent-exploration.ts](examples/multi-agent-exploration.ts). CLI: `agent-merge merge b1 b2 b3 --strategy champion --winner b2`.
+A strategy is a function from `{ base, tails }` to an event list, so an LLM judge or synthesizer plugs in as a plain async function. Runnable demo: [examples/multi-agent-exploration.ts](examples/multi-agent-exploration.ts). CLI: `agent-merge merge b1 b2 b3 --strategy champion --winner b2`. The CLI accepts the same strategy set for any number of branches — `agent-merge merge b1 --strategy conclusions` folds back a single exploration; `ours` / `theirs` are shorthands for keeping just one side.
 
 ## Bisecting a bad run
 
@@ -214,7 +214,7 @@ agent-merge diff main 方案A                                # 分叉后两边�
 agent-merge merge 方案A                                    # 合回来
 agent-merge materialize --pretty                          # 此刻模型会看到的完整上下文
 agent-merge append --on 其他分支                            # 定向写入，不切换当前分支
-agent-merge merge 甲 乙 丙 --strategy conclusions          # N 路合并
+agent-merge merge 甲 乙 丙 --strategy conclusions          # N 路合并；单分支也用同一套策略
 agent-merge bisect <好的步骤> <坏的步骤> --run 'sh check.sh'  # 二分定位出错步骤
 ```
 
@@ -282,7 +282,7 @@ await repo.mergeMany(['探索/甲', '探索/乙', '探索/丙'], { strategy: 'co
 | `pickTailStrategy(i)` | 完整保留一条分支 | 评委已经选出赢家 |
 | `championStrategy(i)` | 赢家全量，外加其他分支的结论 | 有明确赢家，输家的发现也值得保留 |
 
-策略本质是一个从 `{ base, tails }` 到事件列表的函数，让 LLM 当评委或做综合，写一个普通的 async 函数接上即可。可运行的演示：[examples/multi-agent-exploration.ts](examples/multi-agent-exploration.ts)。命令行写法：`agent-merge merge 甲 乙 丙 --strategy champion --winner 乙`。
+策略本质是一个从 `{ base, tails }` 到事件列表的函数，让 LLM 当评委或做综合，写一个普通的 async 函数接上即可。可运行的演示：[examples/multi-agent-exploration.ts](examples/multi-agent-exploration.ts)。命令行写法：`agent-merge merge 甲 乙 丙 --strategy champion --winner 乙`。命令行的 merge 不论合几条分支都用同一套策略——`agent-merge merge 甲 --strategy conclusions` 收拢单条探索分支；`ours` / `theirs` 是"只保留一边"的简写。
 
 ## 二分排查
 

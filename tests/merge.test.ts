@@ -264,6 +264,39 @@ test('pickTailStrategy keeps the winner only; championStrategy salvages conclusi
   await assert.rejects(bad.repo.mergeMany(['agent-1'], { strategy: pickTailStrategy(9) }), MergeError);
 });
 
+test('mergeMany fast-forwards a lone descendant target with the default strategy', async () => {
+  const { repo } = await forkedRepo();
+  await repo.fork('feature');
+  const tip = await repo.append([msg('feature-work', 2)]);
+  await repo.checkout(DEFAULT_BRANCH);
+
+  const ff = await repo.mergeMany(['feature']);
+  assert.equal(ff.kind, 'fast-forward');
+  assert.equal(ff.id, tip);
+  assert.equal(await repo.head(), tip);
+
+  // allowFastForward: false records a merge step with the same context
+  await repo.branch('feature-2');
+  await repo.append([msg('more', 3)], {}, { branch: 'feature-2' });
+  const noFf = await repo.mergeMany(['feature-2'], { allowFastForward: false });
+  assert.equal(noFf.kind, 'merge');
+  assert.deepEqual(texts(await repo.materialize()), ['root', 'feature-work', 'more']);
+});
+
+test('mergeMany with a filtering strategy records a merge step even for a lone descendant', async () => {
+  const { repo } = await forkedRepo();
+  await repo.fork('explore');
+  await repo.append([
+    msg('noise', 2),
+    { kind: 'annotation', at: 3, actor: 'assistant', payload: { text: 'finding' } },
+  ]);
+  await repo.checkout(DEFAULT_BRANCH);
+
+  const result = await repo.mergeMany(['explore'], { strategy: 'conclusions' });
+  assert.equal(result.kind, 'merge', 'conclusions must run instead of fast-forwarding');
+  assert.deepEqual(texts(await repo.materialize()), ['root', 'finding']);
+});
+
 test('mergeMany skips duplicates, HEAD, and already-merged targets', async () => {
   const { repo } = await explorationRepo();
   await repo.mergeMany(['agent-1', 'agent-1', DEFAULT_BRANCH, 'agent-2']);

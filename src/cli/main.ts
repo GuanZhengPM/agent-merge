@@ -5,8 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { AgentMergeError } from '../errors.ts';
-import { builtinManyStrategies, builtinStrategies, championStrategy, pickTailStrategy } from '../merge.ts';
-import type { BuiltinManyStrategyName, BuiltinStrategyName } from '../merge.ts';
+import { builtinManyStrategies, championStrategy, pickTailStrategy } from '../merge.ts';
+import type { BuiltinManyStrategyName, MergeManyStrategy } from '../merge.ts';
 import { CommandEvaluator } from '../orchestration/evaluator.ts';
 import { orchestrate } from '../orchestration/orchestrator.ts';
 import { resolveAgentRunner } from '../orchestration/runner.ts';
@@ -30,13 +30,13 @@ Commands:
   checkout <target>               Switch to a branch, or detach HEAD at a step
   materialize [ref] [--pretty]    Print the model-visible context at a step
   diff <a> <b>                    Show events unique to each side since the merge base
-  merge <ref> [--strategy S] [--label L]
-                                  Merge one branch into HEAD (ours | theirs | interleave)
-  merge <ref> <ref> ... [--strategy S] [--winner B] [--label L]
-                                  N-way merge into HEAD. Strategies: interleave (keep
-                                  everything), conclusions (only annotation events),
-                                  pick (winner only, needs --winner), champion (winner
-                                  in full + others' conclusions, needs --winner)
+  merge <ref> [<ref> ...] [--strategy S] [--winner B] [--label L]
+                                  Merge one or more branches into HEAD. Strategies:
+                                  interleave (keep everything, default), conclusions
+                                  (only annotation events), ours / theirs (keep just
+                                  that side; theirs takes a single branch), pick
+                                  (winner only, needs --winner), champion (winner in
+                                  full + others' conclusions, needs --winner)
   bisect <good> <bad> --run CMD   Find the first step where CMD starts failing;
                                   CMD sees AGENT_MERGE_STEP and AGENT_MERGE_CONTEXT (a JSON file)
   run --task FILE --test CMD [options]
@@ -256,24 +256,21 @@ async function cmdMerge(args: string[]): Promise<void> {
   const repo = await openRepo();
   const meta = label !== undefined ? { meta: { label } } : {};
 
-  if (positionals.length === 1) {
-    if (winner !== undefined) throw new UsageError('--winner only applies when merging multiple branches');
-    if (strategy !== undefined && !Object.hasOwn(builtinStrategies, strategy)) {
-      throw new UsageError(
-        `unknown two-way strategy ${JSON.stringify(strategy)}; expected ${Object.keys(builtinStrategies).join(' | ')}`,
-      );
-    }
-    const result = await repo.merge(positionals[0] as string, {
-      ...(strategy !== undefined ? { strategy: strategy as BuiltinStrategyName } : {}),
-      ...meta,
-    });
-    console.log(`${result.kind}: HEAD is now ${shortId(result.id)}`);
-    return;
+  // One strategy set for any number of branches: every merge goes through
+  // mergeMany with HEAD as tail 0 and the targets following in order.
+  // `ours` and `theirs` are aliases for picking the corresponding tail.
+  let many: MergeManyStrategy | BuiltinManyStrategyName | undefined;
+  if (winner !== undefined && strategy !== 'pick' && strategy !== 'champion') {
+    throw new UsageError('--winner requires --strategy pick or champion');
   }
-
-  // N-way merge: HEAD is tail 0, targets follow in the order given.
-  let many;
-  if (strategy === 'pick' || strategy === 'champion') {
+  if (strategy === 'ours') {
+    many = pickTailStrategy(0);
+  } else if (strategy === 'theirs') {
+    if (positionals.length !== 1) {
+      throw new UsageError('--strategy theirs is ambiguous with multiple branches; use --strategy pick --winner <branch>');
+    }
+    many = pickTailStrategy(1);
+  } else if (strategy === 'pick' || strategy === 'champion') {
     if (winner === undefined) throw new UsageError(`--strategy ${strategy} requires --winner <branch>`);
     const index = winner === (await repo.currentBranch()) ? 0 : positionals.indexOf(winner) + 1;
     if (index === 0 && winner !== (await repo.currentBranch())) {
@@ -283,8 +280,8 @@ async function cmdMerge(args: string[]): Promise<void> {
   } else if (strategy !== undefined) {
     if (!Object.hasOwn(builtinManyStrategies, strategy)) {
       throw new UsageError(
-        `unknown N-way strategy ${JSON.stringify(strategy)}; expected ` +
-          `${Object.keys(builtinManyStrategies).join(' | ')} | pick | champion`,
+        `unknown strategy ${JSON.stringify(strategy)}; expected ` +
+          `${Object.keys(builtinManyStrategies).join(' | ')} | ours | theirs | pick | champion`,
       );
     }
     many = strategy as BuiltinManyStrategyName;
@@ -293,7 +290,8 @@ async function cmdMerge(args: string[]): Promise<void> {
     ...(many !== undefined ? { strategy: many } : {}),
     ...meta,
   });
-  console.log(`${result.kind}: HEAD is now ${shortId(result.id)} (${positionals.length} branches folded in)`);
+  const folded = positionals.length > 1 ? ` (${positionals.length} branches folded in)` : '';
+  console.log(`${result.kind}: HEAD is now ${shortId(result.id)}${folded}`);
 }
 
 async function cmdBisect(args: string[]): Promise<void> {

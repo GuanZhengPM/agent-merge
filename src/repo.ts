@@ -75,6 +75,12 @@ export interface MergeManyOptions {
   /** A builtin N-way strategy name or a custom function. Default: `interleave`. */
   strategy?: MergeManyStrategy | BuiltinManyStrategyName;
   meta?: StepMeta;
+  /**
+   * Move the branch pointer instead of creating a step when there is a single
+   * target descending from HEAD and the strategy would keep its tail
+   * unchanged (only `interleave` and the default qualify). Default: true.
+   */
+  allowFastForward?: boolean;
 }
 
 /** Handed to a bisect predicate for each probed step. */
@@ -542,8 +548,9 @@ export class Repository {
    * agent's findings back with a single strategy that sees all tails at
    * once. Targets that are duplicates, HEAD itself, or already merged are
    * skipped; the merge step's parents are HEAD plus every remaining target.
-   * Unlike {@link merge} there is no fast-forward: a merge step is always
-   * recorded (use `merge` for the two-way case when you want fast-forward).
+   * A single target descending from HEAD fast-forwards when the strategy
+   * would keep its tail unchanged (see {@link MergeManyOptions.allowFastForward});
+   * every other shape records a merge step.
    */
   async mergeMany(targets: readonly string[], options: MergeManyOptions = {}): Promise<MergeResult> {
     if (targets.length === 0) {
@@ -567,6 +574,20 @@ export class Repository {
       }
 
       const baseId = await this.mergeBaseAll([oursId, ...pending]);
+      // Fast-forward only when it is result-preserving: a lone descendant
+      // target, an empty ours tail, and a strategy that keeps the surviving
+      // tail as-is. Filtering strategies (conclusions, pick, champion) and
+      // custom functions must run even in this shape.
+      if (
+        pending.length === 1 &&
+        baseId === oursId &&
+        (options.allowFastForward ?? true) &&
+        (options.strategy === undefined || options.strategy === 'interleave')
+      ) {
+        const targetId = pending[0] as ObjectId;
+        await this.#moveHead(targetId);
+        return { id: targetId, kind: 'fast-forward' as const };
+      }
       const baseContext = baseId === null ? [] : await this.materialize(baseId);
       const tails: MaterializedEvent[][] = [];
       for (const id of [oursId, ...pending]) {

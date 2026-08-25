@@ -100,6 +100,55 @@ test('cli end-to-end: init → append → branch → merge → materialize → b
   }
 });
 
+test('cli merge: one unified strategy set for any number of branches', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-merge-cli-unified-'));
+  try {
+    ok(dir, ['init']);
+    ok(dir, ['append'], JSON.stringify([event('root', 1)]));
+
+    // conclusions works for a single branch (used to be rejected as N-way only)
+    ok(dir, ['branch', 'explore']);
+    ok(dir, ['append', '--on', 'explore'], JSON.stringify([
+      { kind: 'message', at: 2, actor: 'assistant', payload: { text: 'noise' } },
+      { kind: 'annotation', at: 3, actor: 'assistant', payload: { text: 'finding' } },
+    ]));
+    const conclusions = ok(dir, ['merge', 'explore', '--strategy', 'conclusions']);
+    assert.match(conclusions.stdout, /^merge: HEAD is now /);
+    let context = JSON.parse(ok(dir, ['materialize']).stdout) as Array<{ payload: { text: string } }>;
+    assert.deepEqual(
+      context.map((e) => e.payload.text),
+      ['root', 'finding'],
+    );
+
+    // a plain merge of a lone descendant still fast-forwards
+    ok(dir, ['branch', 'ahead']);
+    ok(dir, ['append', '--on', 'ahead'], JSON.stringify(event('ahead-work', 4)));
+    const ff = ok(dir, ['merge', 'ahead']);
+    assert.match(ff.stdout, /^fast-forward: HEAD is now /);
+
+    // theirs keeps only the named branch's tail
+    ok(dir, ['branch', 'other']);
+    ok(dir, ['append', '--on', 'other'], JSON.stringify(event('their-work', 5)));
+    ok(dir, ['append'], JSON.stringify(event('our-work', 6)));
+    ok(dir, ['merge', 'other', '--strategy', 'theirs']);
+    context = JSON.parse(ok(dir, ['materialize']).stdout) as Array<{ payload: { text: string } }>;
+    assert.deepEqual(
+      context.map((e) => e.payload.text),
+      ['root', 'finding', 'ahead-work', 'their-work'],
+    );
+
+    // usage errors exit 2
+    const ambiguous = runCli(dir, ['merge', 'ahead', 'other', '--strategy', 'theirs']);
+    assert.equal(ambiguous.status, 2);
+    assert.match(ambiguous.stderr, /ambiguous with multiple branches/);
+    const strayWinner = runCli(dir, ['merge', 'other', '--winner', 'other']);
+    assert.equal(strayWinner.status, 2);
+    assert.match(strayWinner.stderr, /--winner requires/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('cli outside a repository fails with a friendly error', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'agent-merge-cli-norepo-'));
   try {
