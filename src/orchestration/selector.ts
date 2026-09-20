@@ -1,4 +1,5 @@
 import { OrchestrationError } from '../errors.ts';
+import { hashText } from '../privacy.ts';
 import { runProcess } from './process.ts';
 
 export interface SelectableCandidate {
@@ -10,12 +11,14 @@ export interface SelectableCandidate {
 
 export interface CandidateSelector {
   readonly name: string;
-  select(candidates: readonly SelectableCandidate[], projectRoot: string): Promise<string>;
+  readonly fingerprint?: string;
+  select(candidates: readonly SelectableCandidate[], projectRoot: string, signal?: AbortSignal): Promise<string>;
 }
 
 /** Deterministic safe default: choose the passing patch with the fewest bytes. */
 export class SmallestPatchSelector implements CandidateSelector {
   readonly name = 'smallest-patch';
+  readonly fingerprint = hashText('smallest-patch-v1');
 
   async select(candidates: readonly SelectableCandidate[]): Promise<string> {
     const sorted = [...candidates].sort((a, b) => a.patch.length - b.patch.length || a.id.localeCompare(b.id));
@@ -28,13 +31,17 @@ export class SmallestPatchSelector implements CandidateSelector {
 /** Delegate winner selection to a user or harness command that prints one candidate id. */
 export class CommandCandidateSelector implements CandidateSelector {
   readonly name = 'command';
+  readonly fingerprint: string;
   readonly #command: string;
+  readonly #timeoutMs: number | undefined;
 
-  constructor(command: string) {
+  constructor(command: string, options: { timeoutMs?: number } = {}) {
     this.#command = command;
+    this.fingerprint = hashText(command);
+    this.#timeoutMs = options.timeoutMs;
   }
 
-  async select(candidates: readonly SelectableCandidate[], projectRoot: string): Promise<string> {
+  async select(candidates: readonly SelectableCandidate[], projectRoot: string, signal?: AbortSignal): Promise<string> {
     const summaries = candidates.map(({ id, files, attempts, patch }) => ({
       id,
       files,
@@ -46,6 +53,8 @@ export class CommandCandidateSelector implements CandidateSelector {
       shell: true,
       input: JSON.stringify(candidates),
       env: { ...process.env, AGENT_MERGE_CANDIDATES: JSON.stringify(summaries) },
+      ...(this.#timeoutMs !== undefined ? { timeoutMs: this.#timeoutMs } : {}),
+      ...(signal !== undefined ? { signal } : {}),
     });
     if (result.status !== 0) {
       throw new OrchestrationError(`judge command failed: ${result.stderr.trim() || result.stdout.trim()}`);

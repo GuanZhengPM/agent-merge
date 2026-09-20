@@ -13,7 +13,7 @@ MODE="${1:-user}"
 install_into() {
   dest="$1/agent-merge"
   mkdir -p "$dest"
-  cp "$SOURCE/SKILL.md" "$dest/SKILL.md"
+  cp -R "$SOURCE/." "$dest/"
   echo "installed -> $dest"
 }
 

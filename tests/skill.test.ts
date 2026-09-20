@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
-import { basename, dirname } from 'node:path';
+import { access, readFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
@@ -52,5 +52,13 @@ test('compatibility field, when present, stays within spec bounds', async () => 
   const compatibility = frontmatter.get('compatibility');
   if (compatibility !== undefined) {
     assert.ok(compatibility.length >= 1 && compatibility.length <= 500);
+  }
+});
+
+test('skill routes advanced workflows to shipped reference files', async () => {
+  const { body } = await readSkill();
+  for (const name of ['timeline.md', 'coding-run.md', 'controlled-comparison.md', 'evidence-and-privacy.md']) {
+    assert.match(body, new RegExp(`references/${name.replace('.', '\\.')}`));
+    await access(join(dirname(SKILL_PATH), 'references', name));
   }
 });

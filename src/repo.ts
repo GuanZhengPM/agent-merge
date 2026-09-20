@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readdir } from 'node:fs/promises';
 import { dirname, join, resolve as resolvePath } from 'node:path';
 import {
   AmbiguousRefError,
@@ -41,6 +41,11 @@ const MIN_PREFIX = 4;
 export interface AppendOptions {
   /** Target branch (created if absent). Default: follow HEAD. */
   branch?: string;
+}
+
+export interface InitOptions {
+  /** Permit creating a repository below another agent-merge repository. Default: false. */
+  allowNested?: boolean;
 }
 
 /** One entry of `Repository.log()`. */
@@ -120,46 +125,83 @@ export interface BisectResult {
 export class Repository {
   readonly #objects: ObjectStore;
   readonly #refs: RefStore;
+  /** Project directory containing `.agent-merge`, or `null` for an in-memory repository. */
+  readonly projectRoot: string | null;
 
-  private constructor(objects: ObjectStore, refs: RefStore) {
+  private constructor(objects: ObjectStore, refs: RefStore, projectRoot: string | null) {
     this.#objects = objects;
     this.#refs = refs;
+    this.projectRoot = projectRoot;
   }
 
   /** A repository backed entirely by memory — for tests and embedding. */
   static inMemory(): Repository {
-    return new Repository(new MemoryObjectStore(), new MemoryRefStore());
+    return new Repository(new MemoryObjectStore(), new MemoryRefStore(), null);
   }
 
   /** Create a new repository in `dir/.agent-merge`. */
-  static async init(dir: string): Promise<Repository> {
-    const root = join(resolvePath(dir), AGENT_MERGE_DIR);
+  static async init(dir: string, options: InitOptions = {}): Promise<Repository> {
+    const projectRoot = resolvePath(dir);
+    const root = join(projectRoot, AGENT_MERGE_DIR);
     if (await pathExists(root)) {
-      throw new RepositoryExistsError(`repository already exists at ${root}`);
+      if (await pathExists(join(root, 'HEAD'))) {
+        throw new RepositoryExistsError(`repository already exists at ${root}`);
+      }
+      const unexpected = (await readdir(root)).filter((entry) => entry !== 'runs');
+      if (unexpected.length > 0) {
+        throw new RepositoryExistsError(
+          `cannot initialize repository at ${root}; directory contains non-report data: ${unexpected.join(', ')}`,
+        );
+      }
+    }
+    if (options.allowNested !== true) {
+      const parent = dirname(projectRoot);
+      const ancestor = parent === projectRoot ? undefined : (await Repository.findRoots(parent))[0];
+      if (ancestor !== undefined) {
+        throw new RepositoryExistsError(
+          `refusing to create nested repository at ${root}; ancestor repository exists at ` +
+          `${join(ancestor, AGENT_MERGE_DIR)} (pass allowNested or CLI --nested to override)`,
+        );
+      }
     }
     await mkdir(join(root, 'objects'), { recursive: true });
     await mkdir(join(root, 'refs', 'heads'), { recursive: true });
     const refs = new FsRefStore(root);
     await refs.writeHead({ kind: 'branch', name: DEFAULT_BRANCH });
-    return new Repository(new FsObjectStore(join(root, 'objects')), refs);
+    return new Repository(new FsObjectStore(join(root, 'objects')), refs, projectRoot);
+  }
+
+  /** List every repository root between `dir` and the filesystem root, nearest first. */
+  static async findRoots(dir: string): Promise<string[]> {
+    const roots: string[] = [];
+    let current = resolvePath(dir);
+    for (;;) {
+      if (await pathExists(join(current, AGENT_MERGE_DIR))) roots.push(current);
+      const parent = dirname(current);
+      if (parent === current) return roots;
+      current = parent;
+    }
+  }
+
+  /** Open only `dir/.agent-merge`, without walking into an ancestor repository. */
+  static async openExact(dir: string): Promise<Repository> {
+    const projectRoot = resolvePath(dir);
+    const root = join(projectRoot, AGENT_MERGE_DIR);
+    if (!(await pathExists(root))) {
+      throw new RepositoryNotFoundError(`no ${AGENT_MERGE_DIR} repository exists at ${projectRoot}`);
+    }
+    return new Repository(new FsObjectStore(join(root, 'objects')), new FsRefStore(root), projectRoot);
   }
 
   /** Open the repository at `dir` or the nearest ancestor containing `.agent-merge`. */
   static async open(dir: string): Promise<Repository> {
-    let current = resolvePath(dir);
-    for (;;) {
-      const root = join(current, AGENT_MERGE_DIR);
-      if (await pathExists(root)) {
-        return new Repository(new FsObjectStore(join(root, 'objects')), new FsRefStore(root));
-      }
-      const parent = dirname(current);
-      if (parent === current) {
-        throw new RepositoryNotFoundError(
-          `no ${AGENT_MERGE_DIR} repository found in ${resolvePath(dir)} or any parent directory`,
-        );
-      }
-      current = parent;
+    const projectRoot = (await Repository.findRoots(dir))[0];
+    if (projectRoot === undefined) {
+      throw new RepositoryNotFoundError(
+        `no ${AGENT_MERGE_DIR} repository found in ${resolvePath(dir)} or any parent directory`,
+      );
     }
+    return Repository.openExact(projectRoot);
   }
 
   // ── heads and refs ────────────────────────────────────────────────────────
@@ -178,6 +220,13 @@ export class Repository {
 
   async listBranches(): Promise<ReadonlyMap<string, ObjectId>> {
     return this.#refs.listRefs();
+  }
+
+  /** Whether `ancestorTarget` is the same as or an ancestor of `descendantTarget`. */
+  async isAncestor(ancestorTarget: string, descendantTarget: string): Promise<boolean> {
+    const ancestor = await this.resolve(ancestorTarget);
+    const descendant = await this.resolve(descendantTarget);
+    return (await this.#ancestors(descendant)).has(ancestor);
   }
 
   /** Create branch `name` at `at` (a ref, id, or prefix; default HEAD). */

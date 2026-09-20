@@ -10,9 +10,9 @@ that gives dsh sessions a forkable, mergeable, bisectable history, backed by
 subscribe to the post-commit append feed and write events out on the
 `session/flush` durability checkpoint. This plugin does exactly that — every
 committed session event is mirrored into an agent-merge store, one branch per
-session (`dsh/<session-id>`), one step per flush batch. The full original
-event (`type`, `seq`, `data`) rides in each payload, so the recorded timeline
-is losslessly replayable.
+session (`dsh/<session-id>`), one step per flush batch. Generic redaction is
+enabled by default. Hosts can choose `summary`, `redacted`, or explicit
+`full` recording and can supply a domain-specific redactor.
 
 **Gives the agent timeline tools.** Six tools are registered when a tool
 registry is present:
@@ -53,15 +53,17 @@ The bundle enables recording and timeline tools by default. Its shipped
       name: dsh-plugin-agent-merge
       config:
         record: true
+        recordingMode: redacted
         tools: true
 ```
 
 `path` defaults to the harness process working directory, where the plugin
 creates `.agent-merge/`. A profile may override the inserted `agent-merge`
-row when it needs a fixed workspace path.
+row when it needs a fixed workspace path. Accidental nested stores are rejected;
+set `allowNested: true` only for an intentionally independent nested scope.
 
-Coding orchestration is off by default because it launches workers and can
-modify a Git working tree. In an ordinary DSH profile it uses the native
+Coding orchestration is off by default because it launches workers; applying
+a winner additionally modifies a Git working tree. In an ordinary DSH profile it uses the native
 `spawn` subagent provider by default:
 
 ```yaml
@@ -78,12 +80,14 @@ modify a Git working tree. In an ordinary DSH profile it uses the native
           agents: 3
           retries: 1
           apply: true
+          recordingMode: summary
 ```
 
 Each native child receives the assigned worktree's absolute path and strict
 instructions to keep every read, write, and command inside it. The orchestrator
 then accepts only the patch actually collected from that worktree and refuses
 to apply a winner if the parent checkout changed during the run.
+`apply` defaults to `false`; the example opts in explicitly.
 
 For a different Harness/CLI, set `runnerCommand: my-agent --non-interactive`.
 That process reads the task from stdin and receives

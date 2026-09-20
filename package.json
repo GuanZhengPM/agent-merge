@@ -1,6 +1,6 @@
 {
   "name": "@guanzhengpm/agent-merge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Harness-neutral multi-agent coding orchestration with Git worktrees, test-gated patch selection, repair rounds, and versioned session timelines.",
   "keywords": [
     "agent",
@@ -46,6 +46,7 @@
   },
   "files": [
     "dist",
+    "integrations/skill",
     "README.md",
     "LICENSE"
   ],

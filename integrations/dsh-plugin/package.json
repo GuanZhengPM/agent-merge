@@ -1,6 +1,6 @@
 {
   "name": "dsh-plugin-agent-merge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "DeepSeek Harness plugin for auditable session timelines and optional test-gated multi-agent coding orchestration",
   "keywords": [
     "dsh-plugin",

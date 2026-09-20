@@ -5,6 +5,7 @@ export type {
   BisectProbe,
   BisectResult,
   Diff,
+  InitOptions,
   LogEntry,
   MergeKind,
   MergeManyOptions,
@@ -44,6 +45,9 @@ export type { EventKind, MaterializedEvent, ObjectId, Step, StepMeta, Trajectory
 
 export { canonicalJson, decodeObject, encodeObject, sha256Hex } from './hash.ts';
 export type { ObjectType } from './hash.ts';
+
+export { hashText, recordValue, redactJson, redactText } from './privacy.ts';
+export type { RecordingMode, Redactor } from './privacy.ts';
 
 export { MemoryObjectStore } from './store/object-store.ts';
 export type { ObjectStore } from './store/object-store.ts';

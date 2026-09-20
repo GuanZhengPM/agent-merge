@@ -13,18 +13,22 @@ import type { ObjectId, StepMeta, TrajectoryEvent } from '@guanzhengpm/agent-mer
  */
 export class TimelineStore {
   readonly #dir: string;
+  readonly #allowNested: boolean;
   #repo: Promise<Repository> | null = null;
   #chain: Promise<unknown> = Promise.resolve();
 
   /** @param dir Directory whose `.agent-merge/` store is used (created on demand). */
-  constructor(dir: string) {
+  constructor(dir: string, options: { allowNested?: boolean } = {}) {
     this.#dir = dir;
+    this.#allowNested = options.allowNested ?? false;
   }
 
   #open(): Promise<Repository> {
     if (this.#repo === null) {
-      const attempt = Repository.open(this.#dir).catch((err) => {
-        if (err instanceof RepositoryNotFoundError) return Repository.init(this.#dir);
+      const attempt = Repository.openExact(this.#dir).catch((err) => {
+        if (err instanceof RepositoryNotFoundError) {
+          return Repository.init(this.#dir, { allowNested: this.#allowNested });
+        }
         throw err;
       });
       this.#repo = attempt;

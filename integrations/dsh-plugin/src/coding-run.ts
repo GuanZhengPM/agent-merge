@@ -11,6 +11,7 @@ import {
 } from '@guanzhengpm/agent-merge';
 import type { AgentRunner } from '@guanzhengpm/agent-merge';
 import type { AgentRunInput, AgentRunResult } from '@guanzhengpm/agent-merge';
+import type { RecordingMode } from '@guanzhengpm/agent-merge';
 
 const TEXT_OUTPUT = {
   schema: { type: 'string' },
@@ -30,8 +31,14 @@ export interface CodingRunConfig {
   agents?: number;
   /** Default repair rounds. Default: 1. */
   retries?: number;
-  /** Apply the winning patch to the project. Default: true. */
+  /** Apply the winning patch to the project. Default: false. */
   apply?: boolean;
+  /** Per-worker timeout in milliseconds. */
+  agentTimeoutMs?: number;
+  /** Acceptance-command timeout in milliseconds. */
+  testTimeoutMs?: number;
+  /** Persisted output policy. Default: summary. */
+  recordingMode?: RecordingMode;
   /** Programmatic runner override, primarily for embedding and tests. */
   runner?: AgentRunner;
 }
@@ -121,7 +128,12 @@ export function registerCodingRunTool(ctx: Context, config: CodingRunConfig, def
   const configuredRunner = config.runner ?? (
     config.runnerCommand === undefined
       ? undefined
-      : new CommandAgentRunner({ name: 'dsh-configured', command: config.runnerCommand, shell: true })
+      : new CommandAgentRunner({
+        name: 'dsh-configured',
+        command: config.runnerCommand,
+        shell: true,
+        ...(config.agentTimeoutMs !== undefined ? { timeoutMs: config.agentTimeoutMs } : {}),
+      })
   );
   ctx.tools.register(
     defineTool({
@@ -133,10 +145,14 @@ export function registerCodingRunTool(ctx: Context, config: CodingRunConfig, def
         task: { type: 'string', required: true, description: 'Complete coding task for every worker.' },
         agents: { type: 'number', description: `Worker count (default ${config.agents ?? 3}).` },
         retries: { type: 'number', description: `Repair rounds after the first failure (default ${config.retries ?? 1}).` },
-        dryRun: { type: 'boolean', description: 'Select a winner but do not apply its patch.' },
+        apply: { type: 'boolean', description: 'Explicitly apply the selected patch (default false).' },
+        dryRun: { type: 'boolean', description: 'Compatibility alias for selecting without applying.' },
       },
       output: TEXT_OUTPUT,
       execute: async (args, exec) => {
+        if (args.apply === true && args.dryRun === true) {
+          throw new Error('coding_run cannot combine apply=true with dryRun=true');
+        }
         const runner = configuredRunner ?? (() => {
           if (exec.agent === undefined) {
             throw new Error('coding_run requires a calling DSH agent when no runnerCommand is configured');
@@ -151,13 +167,18 @@ export function registerCodingRunTool(ctx: Context, config: CodingRunConfig, def
           projectDir: config.projectPath ?? defaultPath,
           task: args.task,
           runner,
-          evaluator: new CommandEvaluator(config.testCommand),
+          evaluator: new CommandEvaluator(config.testCommand, {
+            ...(config.testTimeoutMs !== undefined ? { timeoutMs: config.testTimeoutMs } : {}),
+          }),
           agents: args.agents ?? config.agents ?? 3,
           retries: args.retries ?? config.retries ?? 1,
-          apply: args.dryRun === true ? false : (config.apply ?? true),
+          apply: args.dryRun === true ? false : (args.apply ?? config.apply ?? false),
+          recordingMode: config.recordingMode ?? 'summary',
+          ...(config.agentTimeoutMs !== undefined ? { agentTimeoutMs: config.agentTimeoutMs } : {}),
+          signal: exec.signal,
         });
         const candidates = result.candidates
-          .map((candidate) => `${candidate.id}: ${candidate.passed ? 'passed' : 'failed'} (${candidate.attempts} attempts, ${candidate.patch.length} patch bytes)`)
+          .map((candidate) => `${candidate.id}: ${candidate.passed ? 'passed' : 'failed'} (${candidate.attempts} attempts, ${candidate.patchBytes} patch bytes)`)
           .join('\n');
         return (
           `run ${result.runId}: ${result.status}\n${candidates}\n` +

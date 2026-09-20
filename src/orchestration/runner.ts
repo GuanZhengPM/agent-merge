@@ -1,6 +1,7 @@
 import { access } from 'node:fs/promises';
 import { delimiter, join } from 'node:path';
 import { OrchestrationError } from '../errors.ts';
+import { hashText } from '../privacy.ts';
 import { runProcess } from './process.ts';
 
 export interface AgentRunInput {
@@ -9,6 +10,7 @@ export interface AgentRunInput {
   readonly branch: string;
   readonly attempt: number;
   readonly feedback?: string;
+  readonly signal?: AbortSignal;
 }
 
 export interface AgentRunResult {
@@ -16,11 +18,18 @@ export interface AgentRunResult {
   readonly stdout: string;
   readonly stderr: string;
   readonly durationMs: number;
+  readonly timedOut?: boolean;
+  readonly aborted?: boolean;
+  readonly stdoutBytes?: number;
+  readonly stderrBytes?: number;
+  readonly stdoutHash?: string;
+  readonly stderrHash?: string;
 }
 
 /** Adapter implemented by a CLI, a harness plugin, or a native sub-agent host. */
 export interface AgentRunner {
   readonly name: string;
+  readonly fingerprint?: string;
   run(input: AgentRunInput): Promise<AgentRunResult>;
 }
 
@@ -46,20 +55,25 @@ export interface CommandAgentRunnerOptions {
   readonly command: string;
   readonly shell?: boolean;
   readonly args?: readonly string[];
+  readonly timeoutMs?: number;
 }
 
 /** Generic adapter for any agent process. Task and feedback are sent on stdin and in env. */
 export class CommandAgentRunner implements AgentRunner {
   readonly name: string;
+  readonly fingerprint: string;
   readonly #command: string;
   readonly #args: readonly string[];
   readonly #shell: boolean;
+  readonly #timeoutMs: number | undefined;
 
   constructor(options: CommandAgentRunnerOptions) {
     this.name = options.name ?? 'command';
     this.#command = options.command;
     this.#args = options.args ?? [];
     this.#shell = options.shell ?? false;
+    this.#timeoutMs = options.timeoutMs;
+    this.fingerprint = hashText(JSON.stringify({ command: this.#command, args: this.#args }));
   }
 
   async run(input: AgentRunInput): Promise<AgentRunResult> {
@@ -78,23 +92,28 @@ export class CommandAgentRunner implements AgentRunner {
         AGENT_MERGE_TASK: input.task,
         ...(input.feedback !== undefined ? { AGENT_MERGE_FEEDBACK: input.feedback } : {}),
       },
+      ...(this.#timeoutMs !== undefined ? { timeoutMs: this.#timeoutMs } : {}),
+      ...(input.signal !== undefined ? { signal: input.signal } : {}),
     });
     return {
       status: result.status === 0 ? 'completed' : 'failed',
       stdout: result.stdout,
       stderr: result.stderr,
       durationMs: result.durationMs,
+      timedOut: result.timedOut,
+      aborted: result.aborted,
     };
   }
 }
 
 /** The Codex CLI adapter is one implementation; the orchestration API is harness-neutral. */
 export class CodexCliRunner extends CommandAgentRunner {
-  constructor(command = 'codex') {
+  constructor(command = 'codex', timeoutMs?: number) {
     super({
       name: 'codex',
       command,
       args: ['exec', '--ephemeral', '--sandbox', 'workspace-write', '-'],
+      ...(timeoutMs !== undefined ? { timeoutMs } : {}),
     });
   }
 }
@@ -147,6 +166,7 @@ async function executableRuns(command: string): Promise<boolean> {
 export interface ResolveRunnerOptions {
   readonly runner: 'auto' | 'codex' | 'command';
   readonly command?: string;
+  readonly timeoutMs?: number;
 }
 
 /** Resolve the standalone CLI runner. Embedded harnesses should inject AgentRunner directly. */
@@ -155,15 +175,25 @@ export async function resolveAgentRunner(options: ResolveRunnerOptions): Promise
     if (options.command === undefined || options.command.trim() === '') {
       throw new OrchestrationError('--runner command requires --agent-command <command>');
     }
-    return new CommandAgentRunner({ name: 'command', command: options.command, shell: true });
+    return new CommandAgentRunner({
+      name: 'command',
+      command: options.command,
+      shell: true,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
   }
-  if (options.runner === 'codex') return new CodexCliRunner(options.command ?? 'codex');
+  if (options.runner === 'codex') return new CodexCliRunner(options.command ?? 'codex', options.timeoutMs);
 
   const configured = options.command ?? process.env.AGENT_MERGE_RUNNER_COMMAND;
   if (configured !== undefined && configured.trim() !== '') {
-    return new CommandAgentRunner({ name: 'configured', command: configured, shell: true });
+    return new CommandAgentRunner({
+      name: 'configured',
+      command: configured,
+      shell: true,
+      ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    });
   }
-  if (await executableRuns('codex')) return new CodexCliRunner();
+  if (await executableRuns('codex')) return new CodexCliRunner('codex', options.timeoutMs);
   throw new OrchestrationError(
     'no agent runner detected; set --agent-command, use --runner command, or inject AgentRunner from the host harness',
   );
