@@ -1,8 +1,23 @@
 # agent-merge
 
-Harness-neutral multi-agent coding orchestration plus Git-style version control for agent sessions. Run workers in isolated Git worktrees, test their patches, repair failed attempts, apply a winner, and retain every result as an auditable timeline.
+Harness-neutral multi-agent coding orchestration plus Git-style version control for agent sessions. Run workers in isolated Git worktrees, test their patches, repair failed attempts, explicitly apply a winner, and retain every result as an auditable timeline.
 
 English | [中文](#zh)
+
+## Architecture
+
+agent-merge is not implemented as a prompt-only Skill. It has three layers:
+
+```text
+Agent Skill / Harness plugin     choose a workflow and enforce usage policy
+              ↓
+Coding orchestration            worktrees, agents, evaluation, repair, selection
+              ↓
+Timeline core                   content-addressed events, DAG steps, merge, replay, bisect
+```
+
+The TypeScript library and CLI are the product core. The Agent Skill is a thin,
+portable adapter that teaches compatible agents when and how to call that core.
 
 ## The problem
 
@@ -34,10 +49,21 @@ npm install @guanzhengpm/agent-merge
 
 The package has zero runtime dependencies. Node 20.19+ runs the built package; Node 23.6+ runs the repository source directly (no build step).
 
+From a repository checkout, optionally install the complete Agent Skill for the
+current user or only the current project:
+
+```bash
+./integrations/skill/install.sh
+./integrations/skill/install.sh project
+```
+
 ## CLI
 
 ```bash
 agent-merge init
+agent-merge root                                           # active repository
+agent-merge status                                         # branch/evidence summary
+agent-merge doctor                                         # scope and artifact audit
 echo '[{"kind":"message","at":1,"actor":"user","payload":{"text":"hi"}}]' \
   | agent-merge append --label "turn 1"
 
@@ -66,7 +92,9 @@ agent-merge run \
   --retries 1
 ```
 
-It requires a clean, checked-out Git branch. Each worker gets a temporary worktree at the same base commit. The acceptance command runs inside every worktree; only passing patches are eligible. The default judge selects the smallest passing patch, applies it to the current branch without committing, records candidate conclusions in `.agent-merge/`, and writes a full JSON report under `.agent-merge/runs/`. If every first attempt fails, the evaluator output is fed back to all workers for a repair round. Use `--dry-run` to select without applying or `--judge-command` to delegate selection to a harness/model command.
+It requires a clean, checked-out Git branch. Each worker gets a temporary worktree at the same base commit. The acceptance command runs inside every worktree; only passing patches are eligible. The default judge selects the smallest passing patch, records structured candidate evidence in `.agent-merge/`, and writes a provenance report under `.agent-merge/runs/`. Selection does **not** modify the current branch by default; pass `--apply` explicitly to apply the winner without committing. If every first attempt fails, the evaluator output is fed back to all workers for a repair round. Use `--judge-command` to delegate selection to a harness/model command.
+
+Agent, acceptance, and judge commands support independent timeouts. Recording defaults to `summary` (hashes, sizes, status, duration, files, and artifact references); `--recording redacted` stores bounded generically-redacted output, while `--recording full` is explicit opt-in. Worktrees isolate file changes but are not a security sandbox, so command flags must contain trusted input.
 
 The orchestration core is not Codex-specific. A host with native sub-agents injects `AgentRunner` (or uses `CallbackAgentRunner`); any CLI/harness can use `--runner command --agent-command "..."`. The task is sent on stdin and these environment variables are provided: `AGENT_MERGE_WORKSPACE`, `AGENT_MERGE_BRANCH`, `AGENT_MERGE_ATTEMPT`, `AGENT_MERGE_TASK`, and, on repair rounds, `AGENT_MERGE_FEEDBACK`. `--runner auto` honors `AGENT_MERGE_RUNNER_COMMAND` first, then uses the verified Codex CLI adapter when available.
 
@@ -144,7 +172,7 @@ Reconstruction at any step is cheap, so a 1000-step session takes about 10 probe
 
 ## Integrations
 
-- **Agent skill** ([integrations/skill](integrations/skill/)): one `SKILL.md` following the [Agent Skills](https://agentskills.io) standard, usable from Claude Code, Codex CLI, pi, Gemini CLI, Cursor, OpenCode, and other adopters. `integrations/skill/install.sh` installs it for every agent on the machine; `install.sh project` installs it into the current repository.
+- **Agent skill** ([integrations/skill](integrations/skill/)): a thin workflow router plus focused references following the [Agent Skills](https://agentskills.io) standard, usable from Claude Code, Codex CLI, pi, Gemini CLI, Cursor, OpenCode, and other adopters. It chooses when to call the CLI; storage and orchestration remain code. `integrations/skill/install.sh` installs the complete skill directory for every agent on the machine; `install.sh project` installs it into the current repository.
 - **DeepSeek Harness plugin** ([integrations/dsh-plugin](integrations/dsh-plugin/)): subscribes to dsh's session append feed and records every session as a branch, and registers `timeline_*` tools (log, show, fork, merge, merge_many, bisect) so the agent inside dsh can operate on its own history. Built against the published `@deepseek-ai/*` type declarations.
 
 ## Design details
@@ -157,7 +185,15 @@ Reconstruction at any step is cheap, so a 1000-step session takes about 10 probe
 
 ## Status
 
-v0.1, developer preview. The storage format is intended to be stable; APIs above it may still change. The first orchestration layer includes injectable/native runners, generic commands, a Codex CLI adapter, Git worktrees, command evaluation, repair rounds, deterministic or command-based winner selection, patch application, timelines, and reports. Planned: more first-party harness adapters, patch synthesis, trajectory-format (ATIF) import/export, branch deletion/garbage collection, and storage compaction.
+v0.2, developer preview. The storage format is intended to be stable; APIs above it may still change. Orchestration includes injectable/native runners, generic commands, a Codex CLI adapter, Git worktrees, command evaluation, repair rounds, explicit patch application, timeouts, provenance reports, privacy-aware recording, repository diagnostics, and champion-style evidence fan-in. Planned: more first-party harness adapters, patch synthesis, trajectory-format (ATIF) import/export, branch deletion/garbage collection, and storage compaction.
+
+### v0.2 behavior changes
+
+- `agent-merge run` selects but does not apply by default; use `--apply` explicitly.
+- persisted command/model output defaults to `summary`; `redacted` and `full` are opt-in modes.
+- accidental nested timeline repositories are rejected unless `init --nested` is explicit.
+- successful coding runs retain the winner's full recorded tail plus loser conclusions; failed runs retain conclusions only.
+- reports include reproducibility fingerprints and repository-relative, hash-verified artifact references.
 
 ## License
 
@@ -169,7 +205,21 @@ v0.1, developer preview. The storage format is intended to be stable; APIs above
 
 # agent-merge（中文）
 
-面向不同 Harness 的多 Agent 编码编排，加上会话的 Git 式版本控制：在隔离 worktree 中并行解题，用测试筛选和修复 patch，把赢家应用回主分支，并保留完整可审计时间线。
+面向不同 Harness 的多 Agent 编码编排，加上会话的 Git 式版本控制：在隔离 worktree 中并行解题，用测试筛选和修复 patch，显式选择是否把赢家应用回主分支，并保留可审计时间线。
+
+## 架构
+
+agent-merge 不是靠一份 prompt-only Skill 实现的，它分成三层：
+
+```text
+Agent Skill / Harness 插件      选择工作流并约束使用策略
+              ↓
+编码编排层                      worktree、Agent、验收、修复、选优
+              ↓
+轨迹核心                        内容寻址事件、DAG、合并、重放、二分排查
+```
+
+TypeScript Library 和 CLI 是产品核心；Agent Skill 是可移植的薄适配层，负责告诉兼容 Agent 何时、如何调用核心能力。
 
 ## 解决什么问题
 
@@ -201,10 +251,20 @@ npm install @guanzhengpm/agent-merge
 
 零运行时依赖。Node 20.19+ 可运行构建产物；Node 23.6+ 可直接运行仓库源码，无需构建。
 
+从仓库 checkout 中可以选择安装完整 Agent Skill：
+
+```bash
+./integrations/skill/install.sh          # 当前用户
+./integrations/skill/install.sh project  # 仅当前项目
+```
+
 ## 命令行
 
 ```bash
 agent-merge init
+agent-merge root                                           # 当前实际使用的轨迹库
+agent-merge status                                         # 分支与证据摘要
+agent-merge doctor                                         # 作用域、时间与产物审计
 echo '[{"kind":"message","at":1,"actor":"user","payload":{"text":"你好"}}]' \
   | agent-merge append --label "第一轮"
 
@@ -233,7 +293,9 @@ agent-merge run \
   --retries 1
 ```
 
-命令要求当前是干净、已检出的 Git 分支。每个 worker 从同一 commit 获得临时 worktree；验收命令在各自 worktree 内运行，只有通过的 patch 才能成为赢家。默认评委选择改动最小的通过 patch，不自动提交，只应用到当前工作树；候选结论写入 `.agent-merge/`，完整报告写入 `.agent-merge/runs/`。首轮全部失败时，会把 evaluator 输出反馈给所有 worker，自动进入修复轮。`--dry-run` 只选不应用，`--judge-command` 可把 winner 选择交给主 Harness 或模型。
+命令要求当前是干净、已检出的 Git 分支。每个 worker 从同一 commit 获得临时 worktree；验收命令在各自 worktree 内运行，只有通过的 patch 才能成为赢家。默认评委选择改动最小的通过 patch，把结构化候选证据写入 `.agent-merge/`，并在 `.agent-merge/runs/` 保存 provenance 报告。默认只选择、不修改当前工作树；必须显式传入 `--apply` 才应用赢家且不自动提交。首轮全部失败时，会把 evaluator 输出反馈给所有 worker，自动进入修复轮。`--judge-command` 可把 winner 选择交给主 Harness 或模型。
+
+Agent、验收和评委命令分别支持超时。记录默认采用 `summary`，只保留哈希、大小、状态、耗时、文件和产物引用；`--recording redacted` 保存有界脱敏输出，`--recording full` 必须显式开启。worktree 只隔离文件改动，不是安全沙箱，因此命令参数必须来自可信输入。
 
 编排核心不绑定 Codex：有原生 sub-agent 的主 Harness 直接注入 `AgentRunner` / `CallbackAgentRunner`；任意 CLI 用 `--runner command --agent-command "..."`。任务通过 stdin 传递，同时提供 `AGENT_MERGE_WORKSPACE`、`AGENT_MERGE_BRANCH`、`AGENT_MERGE_ATTEMPT`、`AGENT_MERGE_TASK`，修复轮额外提供 `AGENT_MERGE_FEEDBACK`。`--runner auto` 优先采用 `AGENT_MERGE_RUNNER_COMMAND`，否则在可用时使用已验证的 Codex CLI adapter。
 
@@ -298,7 +360,7 @@ console.log(result.firstBadId, result.introduced);
 
 ## 两种现成的集成
 
-- **通用 Agent Skill**（[integrations/skill](integrations/skill/)）：按 [Agent Skills](https://agentskills.io) 开放标准写的一份 `SKILL.md`，Claude Code、Codex CLI、π (pi.dev)、Gemini CLI、Cursor、OpenCode 等支持该标准的工具都能直接使用。运行 `integrations/skill/install.sh` 一次装给本机所有 agent，`install.sh project` 装进当前仓库。
+- **通用 Agent Skill**（[integrations/skill](integrations/skill/)）：按 [Agent Skills](https://agentskills.io) 开放标准提供薄路由入口和按需 references。Skill 决定何时调用，存储与编排仍由代码实现。运行 `integrations/skill/install.sh` 会安装完整 Skill 目录，`install.sh project` 装进当前仓库。
 - **DeepSeek Harness 插件**（[integrations/dsh-plugin](integrations/dsh-plugin/)）：订阅 dsh 的会话事件流，把每个会话自动记录成一条分支，并注册 `timeline_*` 工具（查看、分叉、合并、N 路合并、二分排查），让 dsh 里的 agent 可以操作自己的历史。基于官方发布的 `@deepseek-ai/*` 类型声明编写并通过类型检查。
 
 ## 设计细节
@@ -311,7 +373,15 @@ console.log(result.firstBadId, result.introduced);
 
 ## 状态
 
-v0.1 开发者预览。存储格式计划保持稳定，其上的 API 仍可能调整。第一版编排层已经包含可注入/原生 Runner、通用命令、Codex CLI adapter、Git worktree、命令验收、失败修复轮、确定性或命令式 winner 选择、patch 应用、时间线和报告。后续计划：更多一方 Harness adapter、patch 综合、ATIF 导入导出、分支删除/垃圾回收和存储压缩。
+v0.2 开发者预览。存储格式计划保持稳定，其上的 API 仍可能调整。编排层已经包含可注入/原生 Runner、通用命令、Codex CLI adapter、Git worktree、命令验收、失败修复轮、显式 patch 应用、超时、provenance 报告、隐私感知记录、仓库诊断和 champion 式证据归并。后续计划：更多一方 Harness adapter、patch 综合、ATIF 导入导出、分支删除/垃圾回收和存储压缩。
+
+### v0.2 行为变化
+
+- `agent-merge run` 默认只选择、不应用；必须显式传入 `--apply`。
+- 命令和模型输出默认使用 `summary` 记录；`redacted` 与 `full` 需要主动选择。
+- 默认拒绝意外嵌套的轨迹库；只有显式 `init --nested` 才允许。
+- 编码成功时保留赢家完整轨迹和失败分支结论；全失败时只归并结论。
+- 报告包含可复现 fingerprint，以及仓库相对路径和哈希校验的产物引用。
 
 ## 许可证
 

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -7,7 +7,7 @@ import type { Context } from '@deepseek-ai/cordis';
 import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { SubagentRuntime } from '@deepseek-ai/dsh-subagent';
-import { CallbackAgentRunner } from '@guanzhengpm/agent-merge';
+import { CallbackAgentRunner, Repository } from '@guanzhengpm/agent-merge';
 import { DshSubagentRunner, registerCodingRunTool } from '../src/coding-run.ts';
 import { SessionRecorder, toTrajectoryEvent } from '../src/recorder.ts';
 import { TimelineStore } from '../src/store.ts';
@@ -63,6 +63,20 @@ test('toTrajectoryEvent maps dsh event types onto trajectory kinds', () => {
   assert.deepEqual(mapped.payload, { type: 'user/message', seq: 7, data: { content: 'hi' } });
 });
 
+test('recorder redacts secrets by default and full recording is explicit', () => {
+  const event = fakeEvent(1, 'tool/result', { authorization: 'Bearer private-token', value: 'kept' });
+  const redacted = toTrajectoryEvent(event);
+  assert.deepEqual((redacted.payload as { data: unknown }).data, {
+    authorization: '[REDACTED]',
+    value: 'kept',
+  });
+  const full = toTrajectoryEvent(event, { mode: 'full' });
+  assert.deepEqual((full.payload as { data: unknown }).data, {
+    authorization: 'Bearer private-token',
+    value: 'kept',
+  });
+});
+
 test('lone surrogates in upstream payloads are repaired, not fatal', async () => {
   await withStore(async (store) => {
     const { ctx, emit } = fakeBus();
@@ -83,6 +97,25 @@ test('branchFor produces valid, distinct branch names', () => {
   assert.equal(TimelineStore.branchFor('abc-123'), 'dsh/abc-123');
   assert.equal(TimelineStore.branchFor('weird id!/x'), 'dsh/weird-id--x');
   assert.equal(TimelineStore.branchFor('-leading'), 'dsh/s-leading');
+});
+
+test('timeline store requires explicit opt-in for a nested repository', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'dsh-plugin-nested-'));
+  try {
+    const child = join(dir, 'child');
+    await mkdir(child, { recursive: true });
+    await Repository.init(dir);
+    const event = toTrajectoryEvent(fakeEvent(0, 'turn/start', {}));
+    await assert.rejects(
+      new TimelineStore(child).recordStep('dsh/rejected', [event], { label: 'rejected' }),
+      /refusing to create nested repository/,
+    );
+    const allowed = new TimelineStore(child, { allowNested: true });
+    await allowed.recordStep('dsh/allowed', [event], { label: 'allowed' });
+    await allowed.run(async (repo) => assert.equal(repo.projectRoot, child));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 });
 
 test('coding_run is registered with an injected native harness runner', () => {

@@ -1,6 +1,8 @@
 import type { Context } from '@deepseek-ai/cordis';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import type { EventKind, TrajectoryEvent } from '@guanzhengpm/agent-merge';
+import { recordValue, redactJson } from '@guanzhengpm/agent-merge';
+import type { RecordingMode, Redactor } from '@guanzhengpm/agent-merge';
 import { TimelineStore } from './store.ts';
 
 /**
@@ -15,8 +17,17 @@ export class SessionRecorder {
   readonly #store: TimelineStore;
   readonly #buffers = new Map<string, TrajectoryEvent[]>();
 
-  constructor(ctx: Context, store: TimelineStore) {
+  readonly #mode: RecordingMode;
+  readonly #redactor: Redactor;
+
+  constructor(
+    ctx: Context,
+    store: TimelineStore,
+    options: { mode?: RecordingMode; redactor?: Redactor } = {},
+  ) {
     this.#store = store;
+    this.#mode = options.mode ?? 'redacted';
+    this.#redactor = options.redactor ?? redactJson;
     // Listener registrations are effects on the plugin's fiber; cordis
     // disposes them when the plugin unloads.
     ctx.on('session/event', (session: Session, event: SessionEvent) => {
@@ -35,7 +46,7 @@ export class SessionRecorder {
       buffer = [];
       this.#buffers.set(id, buffer);
     }
-    buffer.push(toTrajectoryEvent(event));
+    buffer.push(toTrajectoryEvent(event, { mode: this.#mode, redactor: this.#redactor }));
   }
 
   /** Write this session's buffered events out as one step. */
@@ -56,15 +67,20 @@ export class SessionRecorder {
 /**
  * One dsh session event, re-expressed as an agent-merge trajectory event.
  * `at` is the event's recorded wall-clock time (already part of the dsh log,
- * so the conversion stays deterministic), and the full original event rides
- * in the payload for lossless replay.
+ * so the conversion stays deterministic). Payload persistence follows the
+ * selected recording mode; full lossless replay is explicit opt-in.
  */
-export function toTrajectoryEvent(event: SessionEvent): TrajectoryEvent {
+export function toTrajectoryEvent(
+  event: SessionEvent,
+  options: { mode?: RecordingMode; redactor?: Redactor } = {},
+): TrajectoryEvent {
+  const mode = options.mode ?? 'redacted';
+  const redactor = options.redactor ?? redactJson;
   return {
     kind: kindOf(event.type),
     at: event.time,
     actor: actorOf(event.type),
-    payload: sanitize({ type: event.type, seq: event.seq, data: event.data }),
+    payload: recordValue(sanitize({ type: event.type, seq: event.seq, data: event.data }), mode, redactor),
   };
 }
 

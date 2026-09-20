@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -48,6 +48,9 @@ test('cli end-to-end: init → append → branch → merge → materialize → b
     assert.match(reinit.stderr, /already exists/);
 
     ok(dir, ['append', '--label', 'turn 1'], JSON.stringify([event('root', 1)]));
+    assert.equal(ok(dir, ['root']).stdout.trim(), await realpath(dir));
+    assert.match(ok(dir, ['status']).stdout, /branch: main/);
+    assert.equal(runCli(dir, ['doctor']).status, 0);
     ok(dir, ['branch', 'side']);
     ok(dir, ['checkout', 'side']);
     ok(dir, ['append'], JSON.stringify(event('side-work', 20)));
@@ -95,6 +98,43 @@ test('cli end-to-end: init → append → branch → merge → materialize → b
     assert.match(unknown.stderr, /unknown command/);
     const badStrategy = runCli(dir, ['merge', 'side', '--strategy', 'nonsense']);
     assert.equal(badStrategy.status, 2);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('cli rejects accidental nested repositories unless --nested is explicit', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-merge-cli-nested-'));
+  try {
+    const child = join(dir, 'child');
+    await mkdir(child, { recursive: true });
+    ok(dir, ['init']);
+    const rejected = runCli(child, ['init']);
+    assert.equal(rejected.status, 1);
+    assert.match(rejected.stderr, /refusing to create nested repository/);
+    ok(child, ['init', '--nested']);
+    assert.equal(ok(child, ['root']).stdout.trim(), await realpath(child));
+    const doctor = runCli(child, ['doctor']);
+    assert.equal(doctor.status, 1);
+    assert.match(doctor.stdout, /nested repositories detected/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('doctor reports missing evidence artifacts', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-merge-cli-doctor-'));
+  try {
+    ok(dir, ['init']);
+    ok(dir, ['append'], JSON.stringify({
+      kind: 'tool_result',
+      at: 1,
+      actor: 'test',
+      payload: { artifact: 'results/missing.json', artifactHash: '0'.repeat(64) },
+    }));
+    const doctor = runCli(dir, ['doctor']);
+    assert.equal(doctor.status, 1);
+    assert.match(doctor.stdout, /artifact is missing or unreadable/);
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

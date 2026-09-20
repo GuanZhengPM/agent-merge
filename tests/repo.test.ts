@@ -42,6 +42,35 @@ test('open outside any repository fails clearly', async () => {
   }
 });
 
+test('init adopts a report-only metadata directory created by a no-timeline run', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-merge-report-only-'));
+  try {
+    await mkdir(join(dir, '.agent-merge', 'runs'), { recursive: true });
+    const repo = await Repository.init(dir);
+    assert.equal(repo.projectRoot, dir);
+    assert.equal(await repo.currentBranch(), DEFAULT_BRANCH);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('nested repositories require explicit opt-in and exact open never walks upward', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'agent-merge-nested-'));
+  try {
+    const child = join(dir, 'child');
+    await mkdir(child, { recursive: true });
+    await Repository.init(dir);
+    await assert.rejects(Repository.init(child), /refusing to create nested repository/);
+    await assert.rejects(Repository.openExact(child), RepositoryNotFoundError);
+    const nested = await Repository.init(child, { allowNested: true });
+    assert.equal(nested.projectRoot, child);
+    assert.deepEqual(await Repository.findRoots(child), [child, dir]);
+    assert.equal((await Repository.open(child)).projectRoot, child);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
 test('append builds a linear history that materializes in order', async () => {
   const repo = Repository.inMemory();
   assert.equal(await repo.head(), null);

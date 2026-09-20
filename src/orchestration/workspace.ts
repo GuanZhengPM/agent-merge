@@ -82,7 +82,14 @@ export class GitWorktreeProvider implements WorkspaceProvider {
     if (patch === '') return;
     const status = await git(this.projectRoot, ['status', '--porcelain', '--untracked-files=all', '--', '.', ':(exclude).agent-merge']);
     if (status !== '') throw new OrchestrationError('main working tree changed during orchestration; refusing to apply winner');
+    await git(this.projectRoot, ['apply', '--check', '--binary', '-'], patch);
     await git(this.projectRoot, ['apply', '--binary', '--whitespace=nowarn', '-'], patch);
+    try {
+      await git(this.projectRoot, ['diff', '--check']);
+    } catch (error) {
+      await git(this.projectRoot, ['apply', '-R', '--binary', '--whitespace=nowarn', '-'], patch).catch(() => '');
+      throw new OrchestrationError('applied patch failed git diff --check and was rolled back', { cause: error });
+    }
   }
 
   async cleanup(): Promise<void> {

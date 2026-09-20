@@ -1,131 +1,69 @@
 ---
 name: agent-merge
-description: Multi-agent coding orchestration, save-points, parallel timelines, and failure bisection. Use when the user wants several agents to solve a coding task in isolated worktrees, test and merge a winner, checkpoint progress, try alternatives, combine findings, roll back, or find which step went wrong. Triggers include 多 agent / 多分支解题 / 自动验收 / 存档 / 分叉 / 两个方案都试 / 合并结论 / 回滚 / 哪一步出错, multi-agent coding, worktree, test and merge, checkpoint, fork, merge findings, bisect.
+description: Multi-agent coding orchestration and evidence-aware trajectory versioning. Use when the user wants isolated coding attempts with test-gated selection, a checkpoint, controlled comparison, merged findings, session recovery, or failure bisection. Triggers include 多 agent / 多分支解题 / 自动验收 / 存档 / 分叉 / 两个方案都试 / 合并结论 / 回滚 / 哪一步出错, multi-agent coding, worktree, test and merge, checkpoint, fork, merge findings, bisect.
 license: MIT
 compatibility: Requires the agent-merge CLI on PATH (npm install -g @guanzhengpm/agent-merge) and a shell tool.
 metadata:
   author: agent-merge
-  version: "0.1.0"
+  version: "0.2.0"
 ---
 
-# agent-merge: session save-points, forks, merges, and bisect
+# agent-merge
 
-agent-merge is a CLI that versions a *timeline of events* the way git versions
-files. You (the agent) use it as a structured work journal: record meaningful
-moments as events, fork parallel timelines when exploring alternatives, merge
-what each alternative learned, and bisect the journal when something went wrong.
+Use agent-merge as a thin control layer over its CLI and timeline engine. The Skill chooses a workflow and preserves authorization boundaries; the CLI performs storage, isolation, evaluation, selection, and merging.
 
-Run `agent-merge help` for the full command list. If the command is missing,
-tell the user to install it (`npm install -g @guanzhengpm/agent-merge`) and stop.
+Run `agent-merge help` first. If unavailable, tell the user to install `@guanzhengpm/agent-merge` and stop.
 
-## Ground rules
+## Preflight
 
-- Keep one repository per project: run `agent-merge init` once in the project
-  root (creates `.agent-merge/`). If a repository already exists, reuse it.
-- Record **milestones, not noise**: decisions taken, conclusions reached,
-  important tool results, user requirements. One `append` per milestone,
-  with a short `--label`.
-- Event format (JSON, single object or array), all four fields required:
+Before any write:
 
-```json
-{"kind": "message", "at": 1723456789000, "actor": "assistant", "payload": {"text": "..."}}
-```
+1. Run `agent-merge root` when a repository may already exist. Use `agent-merge status` and, for audits or resumed work, `agent-merge doctor`.
+2. Keep one timeline repository per project. `agent-merge init` rejects accidental nesting; use `--nested` only when the nested scope is deliberate and explain it to the user.
+3. Preserve unrelated working-tree changes. Coding orchestration requires a clean Git worktree except for `.agent-merge/` metadata.
+4. Never record secrets, credentials, personal data, or unnecessary proprietary output. Read [references/evidence-and-privacy.md](references/evidence-and-privacy.md) before configuring automatic recording.
 
-  - `kind`: `message` (said), `tool_call` (did), `tool_result` (observed),
-    `annotation` (concluded).
-  - `at`: current epoch milliseconds (`date +%s000`).
-  - `actor`: `user`, `assistant`, or a tool name.
-  - `payload`: any JSON. Put the substance here.
+## Select one primary workflow
 
-## Workflows
+### Coding implementation
 
-**End-to-end coding fan-out / test / repair / merge** — prefer this when the
-user wants actual code alternatives rather than timeline-only exploration:
+Use when the user authorized actual code changes and multiple isolated attempts add value. Read [references/coding-run.md](references/coding-run.md).
 
 ```bash
-agent-merge run --task issue.md --agents 3 --runner auto --test '<acceptance command>' --retries 1
+agent-merge run --task task.md --agents 3 --runner auto --test '<acceptance command>'
 ```
 
-- The working tree must be clean. The command creates isolated temporary Git
-  worktrees, runs workers in parallel, evaluates each patch, feeds failures
-  into a repair round, selects a passing winner, applies it without committing,
-  and records a JSON report plus timeline events.
-- Use the current harness's native sub-agent adapter when it exposes one. In an
-  embedded integration, inject `AgentRunner` / `CallbackAgentRunner`. From the
-  standalone CLI, configure any harness with
-  `--runner command --agent-command '<worker command>'`; the task is provided on
-  stdin. `--runner auto` uses `AGENT_MERGE_RUNNER_COMMAND` when set, otherwise a
-  detected supported adapter.
-- The acceptance command is mandatory. Do not select a winner from agent prose
-  alone. Use `--dry-run` when the user only wants comparison and no code applied.
-- If no candidate passes after the configured repair rounds, report failure and
-  leave the main code untouched. Never merge a failing patch just to produce a
-  winner.
+This evaluates and selects without applying by default. Add `--apply` only when the user authorized modifying the working tree. A passing acceptance command is necessary; agent prose is never sufficient evidence.
 
-**Checkpoint (存档)** — after completing a meaningful unit of work:
+### Checkpoint, resume, or timeline inspection
 
-```bash
-echo '[{"kind":"annotation","at":<now-ms>,"actor":"assistant","payload":{"text":"<what was achieved / decided>"}}]' | agent-merge append --label "<milestone>"
-```
+Use for durable save-points, continuing earlier work, or understanding what changed. Read [references/timeline.md](references/timeline.md).
 
-**Fork to try two approaches (分叉)** — before committing to one path:
+### Controlled comparison
 
-1. `agent-merge branch approach-a && agent-merge checkout approach-a`
-2. Work on approach A; append its findings as events.
-3. `agent-merge checkout main`, then `agent-merge branch approach-b --at main`,
-   `agent-merge checkout approach-b`; work on B; append findings.
-4. Tell the user what each branch holds (`agent-merge diff approach-a approach-b`).
+Use when alternatives must share frozen inputs and decision criteria, including non-code experiments. Read [references/controlled-comparison.md](references/controlled-comparison.md).
 
-**Merge findings (合并)** — when a winner is chosen or both matter:
+### Failure bisection
 
-```bash
-agent-merge checkout main
-agent-merge merge approach-a --strategy interleave
-```
+Use only when a known-good step precedes a known-bad step and the predicate is deterministic or demonstrably stable. Read [references/timeline.md](references/timeline.md). An annotation-only journal is not enough for causal bisection.
 
-Then append one `annotation` summarizing what the merged timeline established
-(you are the smart merge strategy). `--strategy ours|theirs` discards the
-other side instead.
+## Merge policy
 
-**Multi-agent fan-out / fan-in (多路探索与归并)** — explore with several
-agents (or several attempts) in parallel, then fold all results back at once:
+Inspect `diff` and materialized branch evidence before merging.
 
-1. Fork one branch per explorer from the shared starting point:
-   `agent-merge branch explore/a --at main` (repeat for b, c, …).
-2. Record each explorer's work onto its own branch with targeted appends —
-   `agent-merge append --on explore/a` — which never touches HEAD, so
-   parallel writers cannot interfere. Have each explorer end with an
-   `annotation` event summarizing what it concluded.
-3. Fold everything back in one N-way merge:
-   `agent-merge checkout main && agent-merge merge explore/a explore/b explore/c --strategy <S>`
+| Strategy | Use when |
+|---|---|
+| `conclusions` | no execution won, or only findings should enter main |
+| `interleave` | every event is compatible and chronology matters |
+| `pick --winner B` | exactly one tail matters and losing findings add no value |
+| `champion --winner B` | one execution won, while loser conclusions remain useful |
 
-Choose `<S>` yourself, based on the situation:
+Successful coding orchestration should retain the winner's full recorded tail plus loser conclusions. Failed runs should merge conclusions only.
 
-| Strategy | Keeps | Choose when |
-|---|---|---|
-| `conclusions` | only each branch's `annotation` events | the usual default: merge what was learned, not raw histories (small context, no fake linear history) |
-| `interleave` | everything, woven by timestamp | histories are short and every step matters |
-| `pick --winner B` | branch B only | one attempt clearly won; the rest add nothing |
-| `champion --winner B` | B in full + others' annotations | B won, but the losers' findings are worth salvaging |
+## Reporting
 
-You are the judge: inspect the branches (`agent-merge diff`, `agent-merge
-materialize <branch>`) and decide the strategy and winner before merging.
-After the merge, append one `annotation` summarizing the combined outcome.
-
-**Bisect a failure (二分排查)** — a long session produced a wrong conclusion:
-
-1. Identify a step id that was still good and one that is bad (`agent-merge log`).
-2. Write a small check script reading `$AGENT_MERGE_CONTEXT` (a JSON file of
-   events up to the probed step) that exits non-zero when the record already
-   looks wrong.
-3. `agent-merge bisect <good-id> <bad-id> --run '<check command>'`
-4. Report the first bad step and the events it introduced to the user.
-
-**Inspect** — `agent-merge log` (history), `agent-merge materialize --pretty`
-(full record at HEAD), `agent-merge diff <a> <b>` (what differs).
-
-## Reporting to the user
-
-Always show step ids as the 12-character short form printed by the CLI, with
-their labels. After forks/merges, state which branch is current. Never delete
-or rewrite recorded history — append corrections as new `annotation` events.
+- Show step ids in 12-character form with labels.
+- State the active branch after checkout or merge.
+- Separate observed facts, inferred causes, and proposals.
+- Include denominators, failures, unknowns, recording mode, and whether a patch was applied.
+- Never rewrite history. Append a correction naming the superseded conclusion.

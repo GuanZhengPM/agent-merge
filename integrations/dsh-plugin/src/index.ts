@@ -16,6 +16,7 @@
  */
 import type { Context } from '@deepseek-ai/cordis';
 import type {} from '@deepseek-ai/dsh-session';
+import type { RecordingMode, Redactor } from '@guanzhengpm/agent-merge';
 import { registerCodingRunTool } from './coding-run.ts';
 import type { CodingRunConfig } from './coding-run.ts';
 import { SessionRecorder } from './recorder.ts';
@@ -33,8 +34,14 @@ export interface Config {
    * Default: the harness process working directory.
    */
   path?: string;
+  /** Explicitly permit `path` to create a repository below another timeline store. */
+  allowNested?: boolean;
   /** Mirror committed session events into the store. Default: true. */
   record?: boolean;
+  /** Persist redacted events by default; `full` is explicit opt-in. */
+  recordingMode?: RecordingMode;
+  /** Optional host-provided redaction hook. */
+  redactor?: Redactor;
   /** Register the `timeline_*` tools. Default: true. */
   tools?: boolean;
   /** Optional, explicit coding orchestration entrypoint. */
@@ -42,10 +49,13 @@ export interface Config {
 }
 
 export function apply(ctx: Context, config: Config = {}): void {
-  const store = new TimelineStore(config.path ?? process.cwd());
+  const store = new TimelineStore(config.path ?? process.cwd(), { allowNested: config.allowNested ?? false });
 
   if (config.record !== false) {
-    new SessionRecorder(ctx, store);
+    new SessionRecorder(ctx, store, {
+      ...(config.recordingMode !== undefined ? { mode: config.recordingMode } : {}),
+      ...(config.redactor !== undefined ? { redactor: config.redactor } : {}),
+    });
   }
 
   if (config.tools !== false || config.orchestration !== undefined) {
